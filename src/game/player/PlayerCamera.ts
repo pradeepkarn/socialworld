@@ -90,7 +90,7 @@ export class PlayerCamera {
     // 0.15 factor gives smooth trailing momentum without laggy sluggishness
     this.camera.target = Vector3.Lerp(this.camera.target, targetPos, 0.15);
 
-    // 2. Wall Occlusion Raycast
+    // 2. Wall Occlusion Raycast with Smooth Zoom-Out Recovery
     // Shoot an invisible ray from the player toward the camera position
     const rayDir = this.camera.position.subtract(this.camera.target).normalize();
     const ray = new Ray(this.camera.target, rayDir, this.desiredRadius);
@@ -99,8 +99,15 @@ export class PlayerCamera {
     });
 
     // If a wall is blocking line of sight, pull camera forward in front of the wall!
-    if (hit && hit.hit && hit.distance > 1.2) {
-      this.camera.radius = Math.max(2.0, hit.distance - 0.5);
+    if (hit && hit.hit && hit.distance > 1.2 && hit.distance < this.desiredRadius) {
+      this.camera.radius = Math.max(2.0, hit.distance - 0.4);
+    } else {
+      // Line of sight is clear: if user scrolled, update desiredRadius; otherwise smoothly restore
+      if (this.camera.radius < this.desiredRadius) {
+        this.camera.radius += (this.desiredRadius - this.camera.radius) * 0.08;
+      } else {
+        this.desiredRadius = this.camera.radius;
+      }
     }
   }
 

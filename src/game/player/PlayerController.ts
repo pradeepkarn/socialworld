@@ -163,9 +163,34 @@ export class PlayerController {
       this.verticalVelocity = Math.max(this.verticalVelocity, -25.0);
     }
 
-    // Step 5: Horizontal movement speed
+    // Step 5: Horizontal movement speed & Sidewalk Step Assist
     const currentSpeed = this.isSprinting ? this.runSpeed : this.walkSpeed;
     const horizontalVelocity = moveDir.scale(this.isMoving ? currentSpeed : 0);
+
+    // Sidewalk Step Assist: Smoothly step up onto 0.25m curbs without stopping or requiring manual jump
+    if (this.isMoving && this.isGrounded) {
+      const stepRayOrigin = this.rootMesh.position.add(new Vector3(0, 0.12, 0));
+      const stepRay = new Ray(stepRayOrigin, moveDir, 0.65);
+      const stepHit = this.scene.pickWithRay(stepRay, (mesh) => {
+        return mesh.checkCollisions && mesh !== this.rootMesh && !mesh.name.startsWith('player_');
+      });
+
+      if (stepHit && stepHit.hit) {
+        // Confirm upper knee/waist is clear (meaning obstacle is a curb/step, not a full building wall)
+        const highRayOrigin = this.rootMesh.position.add(new Vector3(0, 0.45, 0));
+        const highRay = new Ray(highRayOrigin, moveDir, 0.7);
+        const highHit = this.scene.pickWithRay(highRay, (mesh) => {
+          return mesh.checkCollisions && mesh !== this.rootMesh && !mesh.name.startsWith('player_');
+        });
+
+        if (!highHit || !highHit.hit) {
+          this.verticalVelocity = 1.6; // Gentle vertical lift to smoothly mount the curb
+        }
+      }
+    }
+
+    // Update internal velocity vector (for state synchronization)
+    this.velocity = new Vector3(horizontalVelocity.x, this.verticalVelocity, horizontalVelocity.z);
 
     // Step 6: Assemble total 3D displacement vector (dx = v * dt)
     const displacement = new Vector3(
@@ -177,9 +202,9 @@ export class PlayerController {
     // Step 7: Move with Babylon's collision detection (slides along walls)
     this.rootMesh.moveWithCollisions(displacement);
 
-    // Step 8: Safety respawn if falling out of world
+    // Step 8: Safety respawn if falling out of world (spawns safely at avenue promenade, not inside monument)
     if (this.rootMesh.position.y < -5) {
-      this.rootMesh.position.set(0, 2, 0);
+      this.rootMesh.position.set(0, 1.2, 8);
       this.verticalVelocity = 0;
     }
 
@@ -212,6 +237,14 @@ export class PlayerController {
     });
 
     this.isGrounded = !!(hit && hit.hit);
+  }
+
+  public getVelocity(): Vector3 {
+    return this.velocity;
+  }
+
+  public getIsGrounded(): boolean {
+    return this.isGrounded;
   }
 
   public getIsMoving(): boolean {

@@ -68,7 +68,7 @@ export const ShopUI: React.FC<ShopUIProps> = ({
   useEffect(() => {
     if (!shop) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.code === 'Escape') {
+      if (e.key === 'Escape' || e.code === 'Escape' || e.key === 'e' || e.key === 'E') {
         onClose();
       }
     };
@@ -117,7 +117,15 @@ export const ShopUI: React.FC<ShopUIProps> = ({
   });
 
   return (
-    <div id="shop-modal-overlay" style={styles.overlay}>
+    <div
+      id="shop-modal-overlay"
+      style={styles.overlay}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div style={{ ...styles.modal, borderColor: bannerColor }}>
         {/* Header */}
         <div style={styles.header}>

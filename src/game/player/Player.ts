@@ -221,6 +221,7 @@ export class Player {
   }
 
   public getState(): IPlayerState {
+    const vel = this.controller.getVelocity();
     return {
       id: this.id,
       name: this.name,
@@ -236,8 +237,12 @@ export class Player {
         w: 1,
       },
       animationState: this.animation.getState(),
-      velocity: { x: 0, y: 0, z: 0 },
-      isGrounded: true,
+      velocity: {
+        x: vel ? vel.x : 0,
+        y: vel ? vel.y : 0,
+        z: vel ? vel.z : 0,
+      },
+      isGrounded: this.controller.getIsGrounded(),
       credits: this.credits,
       inventory: this.inventory,
     };
