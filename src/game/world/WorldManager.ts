@@ -5,6 +5,18 @@ import { DayNightCycle } from './DayNightCycle';
 import { City } from './City';
 import { TimeOfDay } from '@/types/game';
 
+/**
+ * =========================================================================
+ * WorldManager - The Grand Overseer of the 3D World
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Glues all world subsystems together into one easy-to-use controller:
+ *   1. Environment: Lighting, soft shadows, fog, and sky.
+ *   2. DayNightCycle: Transitions between Day -> Sunset -> Night.
+ *   3. City: Procedural ground, boulevards, sidewalks, plaza, and skyscrapers.
+ * - Wire up events: When day turns to night, it automatically instructs
+ *   City street lamps to flare up and illuminate the dark boulevards!
+ */
 export class WorldManager {
   public scene: Scene;
   public assetManager: AssetManager;
@@ -32,18 +44,30 @@ export class WorldManager {
     });
   }
 
+  /**
+   * Returns current time of day: 'day' | 'sunset' | 'night'.
+   */
   public getTimeOfDay(): TimeOfDay {
     return this.dayNightCycle.getTime();
   }
 
+  /**
+   * Sets a specific time of day.
+   */
   public setTimeOfDay(time: TimeOfDay): void {
     this.dayNightCycle.setTime(time);
   }
 
+  /**
+   * Cycles to the next time of day (e.g. Day -> Sunset -> Night -> Day).
+   */
   public toggleTimeOfDay(): TimeOfDay {
     return this.dayNightCycle.toggle();
   }
 
+  /**
+   * Cleans up all world meshes and shaders on unmount.
+   */
   public dispose(): void {
     this.city.dispose();
     this.dayNightCycle.dispose();

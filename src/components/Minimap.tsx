@@ -8,6 +8,25 @@ interface MinimapProps {
   playerRotationY: number;
 }
 
+/**
+ * =========================================================================
+ * Minimap - Tactical Circular HUD Radar
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Renders a sleek cyberpunk circular radar in the top-right corner.
+ * - Tracks the player's 3D coordinates and displays:
+ *   - Main roads & intersections relative to player
+ *   - CyberMart (cyan blip) & Neon Cafe (magenta blip)
+ *   - Central Plaza monument (blue square)
+ *   - Green player arrow pointing in the direction the character is facing.
+ *
+ * KEY 2D CANVAS TECHNIQUES:
+ * - Circular Clipping (`ctx.clip()`): Masks all road/shop drawing so nothing
+ *   spills outside the round radar circle.
+ * - World-to-Radar Coordinate Mapping (`worldToRadar`):
+ *   Formula: `screenX = (worldX - playerX) * scale`
+ *   Translates 3D meters into 2D radar pixels, always keeping the player centered!
+ */
 export const Minimap: React.FC<MinimapProps> = ({ playerPosition, playerRotationY }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -19,22 +38,22 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPosition, playerRotation
 
     const size = 160;
     const center = size / 2;
-    const scale = 1.35; // 1 meter in 3D = 1.35 px on radar
+    const scale = 1.35; // Scale factor: 1 meter in 3D world = 1.35 pixels on radar
 
-    // Clear radar
+    // Clear previous radar frame
     ctx.clearRect(0, 0, size, size);
 
-    // Radar circular clipping
+    // 1. Radar Circular Clipping Mask (keeps everything inside the circle)
     ctx.save();
     ctx.beginPath();
     ctx.arc(center, center, center - 4, 0, Math.PI * 2);
     ctx.clip();
 
-    // Dark radar background with grid lines
+    // Dark cyber radar background
     ctx.fillStyle = '#090d16';
     ctx.fillRect(0, 0, size, size);
 
-    // Range rings
+    // Concentric sonar range rings (30px and 55px radius)
     ctx.strokeStyle = 'rgba(0, 229, 255, 0.15)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -42,14 +61,14 @@ export const Minimap: React.FC<MinimapProps> = ({ playerPosition, playerRotation
     ctx.arc(center, center, 55, 0, Math.PI * 2);
     ctx.stroke();
 
-    // World-to-radar transformation (centered on player)
+    // 2. World-to-Radar Coordinate Transform (anchored at center of radar)
     ctx.save();
     ctx.translate(center, center);
 
     const worldToRadar = (wx: number, wz: number) => {
       return {
         x: (wx - playerPosition.x) * scale,
-        y: -(wz - playerPosition.z) * scale,
+        y: -(wz - playerPosition.z) * scale, // Invert Z because screen Y goes downwards
       };
     };
 

@@ -1,5 +1,19 @@
 import { IProduct } from '@/types/game';
 
+/**
+ * =========================================================================
+ * CYBERMART CATALOG
+ * =========================================================================
+ * High-tech hardware, cybernetic gear, and wearable apparel sold at CyberMart.
+ * Each item has:
+ * - id: Unique catalog identifier.
+ * - name: Display title in the shop UI.
+ * - description: Flavor text explaining what the item does in the cyberpunk world.
+ * - price: Cost in player credits ($).
+ * - category: 'tech' or 'apparel'.
+ * - icon: Lucide icon component name to render in React.
+ * - stock: Inventory count available for purchase.
+ */
 export const CYBERMART_PRODUCTS: IProduct[] = [
   {
     id: 'prod_cyberdeck',
@@ -48,6 +62,12 @@ export const CYBERMART_PRODUCTS: IProduct[] = [
   },
 ];
 
+/**
+ * =========================================================================
+ * NEON CAFE CATALOG
+ * =========================================================================
+ * Consumable refreshments, energizing beverages, and first-aid stims sold at Neon Cafe.
+ */
 export const NEONCAFE_PRODUCTS: IProduct[] = [
   {
     id: 'prod_quantum_energy',

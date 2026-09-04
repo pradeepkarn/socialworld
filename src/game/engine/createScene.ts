@@ -6,7 +6,20 @@ export interface SceneConfig {
 }
 
 /**
- * Initializes a new Babylon Scene configured with physics/collisions for open-world exploration.
+ * =========================================================================
+ * createScene() - 3D World Stage Initializer
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Creates the Babylon.js `Scene` instance where all meshes, cameras, lights,
+ *   and physics calculations live.
+ *
+ * KEY CONCEPTS:
+ * - collisionsEnabled = true: Globally enables collision testing so meshes
+ *   marked with `checkCollisions = true` physically block each other.
+ * - gravity = Vector3(0, -9.81, 0): Standard real-world Earth gravity vector
+ *   (9.81 m/s^2 downwards).
+ * - clearColor: Dark cyber-space void background color displayed before
+ *   the sky dome or buildings render.
  */
 export function createScene(engine: Engine, config: SceneConfig = {}): Scene {
   const scene = new Scene(engine);

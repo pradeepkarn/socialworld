@@ -5,6 +5,18 @@ import { ShopManager } from '../shops/ShopManager';
 export type PromptListener = (prompt: IInteractionPrompt) => void;
 export type OpenShopListener = (shop: IShop | null) => void;
 
+/**
+ * =========================================================================
+ * InteractionManager - The Bridge Between 3D World & 2D React UI
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Listens to the player's position in the 3D scene every frame.
+ * - When the player walks close to a shop entrance, it tells React to display
+ *   the floating "Press [E] to browse CyberMart" prompt overlay.
+ * - When the player presses 'E', it pauses player movement and opens the
+ *   full-screen 2D shopping catalog modal (`ShopUI.tsx`).
+ * - When the shop modal closes, it restores player movement.
+ */
 export class InteractionManager {
   private player: Player;
   private shopManager: ShopManager;
@@ -23,24 +35,38 @@ export class InteractionManager {
     this.player = player;
     this.shopManager = shopManager;
 
-    // Attach interaction key handler from PlayerController
+    // Attach interaction key handler from PlayerController (fires on 'E' keydown)
     this.player.controller.onInteractPressed = this.handleInteractPressed;
   }
 
+  /**
+   * Allows React components to subscribe to changes in the interaction prompt.
+   */
   public onPrompt(listener: PromptListener): () => void {
     this.promptListeners.add(listener);
-    // Emit current state immediately
+    // Emit current state immediately to the new listener
     listener(this.currentPrompt);
     return () => this.promptListeners.delete(listener);
   }
 
+  /**
+   * Allows React components to listen for when a shop modal opens or closes.
+   */
   public onOpenShop(listener: OpenShopListener): () => void {
     this.openShopListeners.add(listener);
     return () => this.openShopListeners.delete(listener);
   }
 
   /**
-   * Called every frame in the Babylon render loop.
+   * =========================================================================
+   * update() - Frame-by-Frame Proximity Checker
+   * =========================================================================
+   * WHAT IT DOES:
+   * - Called inside Babylon's 60 FPS render loop (`engine.runRenderLoop`).
+   * - If player is already shopping in a menu, it skips checking.
+   * - Finds if any shop is near the player's current (X, Y, Z).
+   * - If yes: displays the "[E] Browse" HUD banner.
+   * - If no: automatically hides the banner when walking away.
    */
   public update(): void {
     // If shop modal is already open, do not show walking prompts
@@ -75,11 +101,23 @@ export class InteractionManager {
     }
   }
 
+  /**
+   * Internal helper to broadcast prompt updates to all React listeners.
+   */
   private setPrompt(prompt: IInteractionPrompt): void {
     this.currentPrompt = prompt;
     this.promptListeners.forEach((fn) => fn(prompt));
   }
 
+  /**
+   * =========================================================================
+   * handleInteractPressed() - 'E' Key Event Handler
+   * =========================================================================
+   * WHAT IT DOES:
+   * - When player taps the 'E' key:
+   *   - If a shop is already open -> closes it.
+   *   - If standing in front of a shop -> opens that shop's catalog.
+   */
   private handleInteractPressed = (): void => {
     // If shop is already open, pressing E closes it
     if (this.activeOpenShop) {
@@ -96,6 +134,16 @@ export class InteractionManager {
     }
   };
 
+  /**
+   * =========================================================================
+   * openShop() - Opening Shop Modal & Freezing Movement
+   * =========================================================================
+   * WHAT IT DOES:
+   * - Locks player WASD/mouse movement so you don't accidentally walk into a wall
+   *   while browsing items.
+   * - Hides the interaction prompt.
+   * - Tells React to render the ShopUI modal overlay.
+   */
   public openShop(shop: IShop): void {
     this.activeOpenShop = shop;
     this.player.controller.setLocked(true); // Lock character movement while shopping
@@ -103,12 +151,23 @@ export class InteractionManager {
     this.openShopListeners.forEach((fn) => fn(shop));
   }
 
+  /**
+   * =========================================================================
+   * closeShop() - Exiting Shop Modal & Restoring Movement
+   * =========================================================================
+   * WHAT IT DOES:
+   * - Unlocks character controls so the player can walk around freely again.
+   * - Dismisses the React shop modal.
+   */
   public closeShop(): void {
     this.activeOpenShop = null;
     this.player.controller.setLocked(false); // Restore character movement
     this.openShopListeners.forEach((fn) => fn(null));
   }
 
+  /**
+   * Cleans up listener sets when unmounting.
+   */
   public dispose(): void {
     this.promptListeners.clear();
     this.openShopListeners.clear();

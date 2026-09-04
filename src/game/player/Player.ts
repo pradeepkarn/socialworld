@@ -14,6 +14,20 @@ import { PlayerCamera } from './PlayerCamera';
 import { Environment } from '../world/Environment';
 import { IInventoryItem, IPlayerState } from '@/types/game';
 
+/**
+ * =========================================================================
+ * Player - The User's Avatar in the 3D Cyber City
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Represents the local player character in the game world.
+ * - Coordinates 5 core subsystems:
+ *   1. Physical Collision Capsule (`rootMesh`): Invisible hull that walks and bumps into walls.
+ *   2. Visual Character Rig (`buildAvatarRig`): Cyber suit, glowing visor, and limbs.
+ *   3. Procedural Animation (`PlayerAnimation`): Swings arms & legs while running.
+ *   4. Smooth Orbit Camera (`PlayerCamera`): Third-person camera following behind.
+ *   5. Input Controller (`PlayerController`): Translates WASD keys into 3D movement.
+ * - Manages RPG state: Wallet balance (`credits`) and item inventory.
+ */
 export class Player {
   public scene: Scene;
   public rootMesh: AbstractMesh;
@@ -41,34 +55,50 @@ export class Player {
   constructor(scene: Scene, canvas: HTMLCanvasElement, environment: Environment) {
     this.scene = scene;
 
-    // 1. Root Collision Ellipsoid
+    // 1. Root Collision Capsule (Invisible physics capsule)
+    // The physics engine checks this pill-shaped capsule against walls and sidewalks.
     this.rootMesh = MeshBuilder.CreateCapsule(
       'player_root',
       { radius: 0.45, height: 1.9, subdivisions: 8 },
       this.scene
     );
     this.rootMesh.position = new Vector3(0, 1.0, 8); // Spawn on central avenue promenade facing north
-    this.rootMesh.isVisible = false;
-    this.rootMesh.checkCollisions = true;
+    this.rootMesh.isVisible = false;                // Invisible (we only see the avatar rig inside it)
+    this.rootMesh.checkCollisions = true;           // Enables Babylon collision physics
     this.rootMesh.ellipsoid = new Vector3(0.45, 0.95, 0.45);
     this.rootMesh.ellipsoidOffset = new Vector3(0, 0.95, 0);
 
-    // 2. Build Humanoid Cyber Rig & Limbs
+    // 2. Build Humanoid Cyber Rig & Limbs (visual body parented to rootMesh)
     const limbs = this.buildAvatarRig(this.rootMesh, environment);
 
-    // 3. Initialize Animation System
+    // 3. Initialize Animation System (drives limb rotations)
     this.animation = new PlayerAnimation(limbs);
 
-    // 4. Initialize Camera System
+    // 4. Initialize Camera System (smooth third-person follow camera)
     this.camera = new PlayerCamera(scene, canvas);
     this.camera.setTarget(this.rootMesh);
 
-    // 5. Initialize Input Controller
+    // 5. Initialize Input Controller (WASD keyboard + mouse look)
     this.controller = new PlayerController(scene, this.rootMesh, this.camera, this.animation);
   }
 
   /**
-   * Constructs the stylized humanoid mesh rig with articulated joints.
+   * =========================================================================
+   * buildAvatarRig() - Procedural Cyber Character Model
+   * =========================================================================
+   * WHAT IT DOES:
+   * - Constructs an articulated 3D character using geometric primitives:
+   *   - Torso box with dark armored suit material
+   *   - Glowing cyan Arc Reactor on the chest
+   *   - Tactical backpack on the back
+   *   - Head sphere with glowing cyber visor
+   *   - Left & Right Arms (parented to shoulder pivot nodes)
+   *   - Left & Right Legs (parented to hip pivot nodes)
+   *
+   * KEY CONCEPT: Pivot TransformNodes (`TransformNode`):
+   * - If you rotate a cylinder arm directly, it rotates around its center (elbow).
+   * - By placing a `TransformNode` at the shoulder/hip joint and parenting the arm/leg
+   *   to it, swinging the limb pivots naturally from the shoulder/hip socket!
    */
   private buildAvatarRig(parent: AbstractMesh, environment: Environment): IPlayerLimbNodes {
     // Materials

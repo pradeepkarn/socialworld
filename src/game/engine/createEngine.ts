@@ -7,7 +7,20 @@ export interface EngineOptions {
 }
 
 /**
- * Creates and configures an optimized Babylon.js rendering engine.
+ * =========================================================================
+ * createEngine() - WebGL 3D Rendering Engine Bootstrapper
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Initializes the underlying Babylon.js WebGL / WebGPU engine attached to
+ *   an HTML5 `<canvas>` element.
+ *
+ * KEY PERFORMANCE CONCEPTS:
+ * - antialias = true: Smooths jagged 3D polygon edges (MSAA).
+ * - powerPreference: 'high-performance': Requests the user's dedicated discrete GPU
+ *   (e.g. NVIDIA / AMD) instead of battery-saving low-power integrated graphics.
+ * - Retina / High-DPI Scaling (`setHardwareScalingLevel`):
+ *   Checks `window.devicePixelRatio`. Caps it at 2x so 4K Retina screens look
+ *   razor-sharp without melting the GPU!
  */
 export function createEngine(
   canvas: HTMLCanvasElement,

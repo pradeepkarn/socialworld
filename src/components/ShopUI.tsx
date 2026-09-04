@@ -39,6 +39,22 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   CreditCard: <CreditCard size={22} />,
 };
 
+/**
+ * =========================================================================
+ * ShopUI - Cyberpunk Glassmorphic Commerce Modal
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Full-screen overlay modal that opens when the player presses 'E' near a shop.
+ * - Displays store items, descriptions, prices, player credit balance, and inventory.
+ *
+ * KEY UI CONCEPTS:
+ * - Dynamic Store Theme: Adapts its borders, icons, and buttons to match the
+ *   shop's neon color (`shop.bannerColor` -> cyan for CyberMart, hot pink for Neon Cafe).
+ * - Keyboard Escape Listener: Pressing [ESC] automatically closes the modal
+ *   and returns control back to the 3D game.
+ * - Glassmorphism: Semi-transparent backdrop filter blur (`backdropFilter: 'blur(8px)'`)
+ *   giving a premium modern futuristic look.
+ */
 export const ShopUI: React.FC<ShopUIProps> = ({
   shop,
   credits,

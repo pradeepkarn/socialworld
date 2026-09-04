@@ -32,6 +32,23 @@ interface GameCanvasProps {
   canvasRefCallback?: (handle: GameCanvasHandle | null) => void;
 }
 
+/**
+ * =========================================================================
+ * GameCanvas - React-Babylon 3D Game Lifecycle Host
+ * =========================================================================
+ * WHAT IT DOES:
+ * - Mounts an HTML5 `<canvas>` in React and spins up the entire 3D universe!
+ * - Manages the lifecycle of Babylon.js (creation, render loop, and cleanup).
+ * - Bridges 3D game events (like opening a shop or updating minimap) into
+ *   standard React state hooks.
+ *
+ * KEY GAME ARCHITECTURE PATTERNS:
+ * - 60 FPS Render Loop: `engine.runRenderLoop()` runs every 16 milliseconds
+ *   updating player movement, collision physics, and drawing pixels to screen.
+ * - State Throttling (10 Hz): React cannot re-render 60 times a second without
+ *   lagging. We throttle minimap coordinates to 10 Hz (every 90ms) so React
+ *   stays lightning-fast while Babylon renders silky-smooth 60 FPS in 3D!
+ */
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   onPromptChange,
   onOpenShop,
@@ -55,7 +72,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     let isDisposed = false;
 
     try {
-      // 1. Create Engine
+      // Step 1: Initialize WebGL Engine
       engine = createEngine(canvas);
 
       // 2. Create Scene
