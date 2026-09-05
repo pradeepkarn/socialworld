@@ -8,6 +8,7 @@ import {
   MeshBuilder,
   StandardMaterial,
   AbstractMesh,
+  Mesh,
   GlowLayer,
 } from '@babylonjs/core';
 
@@ -69,7 +70,7 @@ export class Environment {
         mainTextureRatio: 0.5,
         blurKernelSize: 24,
       });
-      this.glowLayer.intensity = 0.55;
+      this.glowLayer.intensity = 0.22; // Tasteful, controlled bloom that never washes out text
     } catch (e) {
       console.warn('[Environment] GlowLayer failed to initialize:', e);
     }
@@ -115,6 +116,15 @@ export class Environment {
   public addShadowCaster(mesh: AbstractMesh): void {
     if (this.shadowGenerator) {
       this.shadowGenerator.addShadowCaster(mesh, true);
+    }
+  }
+
+  /**
+   * Excludes a mesh (such as a text sign or nametag) from the GlowLayer to prevent bloom washout.
+   */
+  public addExcludedGlowMesh(mesh: Mesh): void {
+    if (this.glowLayer) {
+      this.glowLayer.addExcludedMesh(mesh);
     }
   }
 

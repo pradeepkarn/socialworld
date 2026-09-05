@@ -9,6 +9,10 @@ import { WorldManager } from '@/game/world/WorldManager';
 import { Player } from '@/game/player/Player';
 import { ShopManager } from '@/game/shops/ShopManager';
 import { InteractionManager } from '@/game/interaction/InteractionManager';
+import { MultiplayerClient } from '@/game/multiplayer/MultiplayerClient';
+import { RemotePlayerManager } from '@/game/multiplayer/RemotePlayerManager';
+import { getDeterministicAppearance } from '@/game/player/PlayerAppearance';
+import { INetworkStats } from '@/game/multiplayer/NetworkTypes';
 import {
   IInteractionPrompt,
   IShop,
@@ -29,6 +33,7 @@ interface GameCanvasProps {
   onPlayerStatsUpdate: (stats: { credits: number; inventory: IInventoryItem[] }) => void;
   onMinimapUpdate: (data: { position: IVector3; rotationY: number }) => void;
   onTimeOfDayChange: (time: TimeOfDay) => void;
+  onNetworkStatsUpdate?: (stats: INetworkStats) => void;
   canvasRefCallback?: (handle: GameCanvasHandle | null) => void;
 }
 
@@ -55,6 +60,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onPlayerStatsUpdate,
   onMinimapUpdate,
   onTimeOfDayChange,
+  onNetworkStatsUpdate,
   canvasRefCallback,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -77,6 +83,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       // 2. Create Scene
       scene = createScene(engine);
+      if (typeof window !== 'undefined') {
+        (window as unknown as Record<string, unknown>).__scene = scene;
+      }
 
       // 3. Asset & World Management
       const assetManager = new AssetManager(scene);
@@ -84,6 +93,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       // 4. Player & Rig
       player = new Player(scene, canvas, worldManager.environment);
+
+      // 4b. Multiplayer Foundation (Phase 2)
+      const remotePlayerManager = new RemotePlayerManager(scene);
+      const networkClient = new MultiplayerClient();
+
+      if (typeof window !== 'undefined') {
+        (window as unknown as Record<string, unknown>).__player = player;
+        (window as unknown as Record<string, unknown>).__remotePlayerManager = remotePlayerManager;
+      }
+
+      networkClient.onWelcome((payload) => {
+        if (player) {
+          player.id = payload.id;
+          player.name = payload.name;
+          player.applyAppearance(getDeterministicAppearance(payload.id));
+          player.updateName(payload.name);
+          player.rootMesh.position.set(payload.spawnPosition.x, payload.spawnPosition.y, payload.spawnPosition.z);
+        }
+        for (const remoteState of payload.players) {
+          remotePlayerManager.spawnPlayer(remoteState);
+        }
+      });
+
+      networkClient.onPlayerJoined((remoteState) => {
+        remotePlayerManager.spawnPlayer(remoteState);
+      });
+
+      networkClient.onPlayerLeft((id) => {
+        remotePlayerManager.removePlayer(id);
+      });
+
+      networkClient.onPlayerUpdates((updates) => {
+        remotePlayerManager.handleBatchUpdates(updates);
+      });
+
+      networkClient.onStatsChange((stats) => {
+        if (!isDisposed && onNetworkStatsUpdate) {
+          onNetworkStatsUpdate(stats);
+        }
+      });
+
+      networkClient.connect();
 
       // 5. Shops & Interactions
       shopManager = new ShopManager();
@@ -144,7 +195,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Update player & camera
         if (player) {
           player.update(deltaTime);
+
+          // Phase 2: Send throttled movement state to server (20 Hz)
+          const vel = player.controller.getVelocity();
+          networkClient.sendPlayerUpdate(
+            player.rootMesh.position,
+            player.rootMesh.rotation.y,
+            player.animation.getState(),
+            vel ? { x: vel.x, y: vel.y, z: vel.z } : undefined
+          );
         }
+
+        // Phase 2: Smoothly interpolate all remote players
+        remotePlayerManager.update(deltaTime);
 
         // Update proximity interaction triggers
         if (interactionManager) {
@@ -184,6 +247,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         window.removeEventListener('resize', handleResize);
         unsubPrompt();
         unsubShop();
+
+        networkClient.disconnect();
+        remotePlayerManager.dispose();
+
+        if (typeof window !== 'undefined') {
+          delete (window as unknown as Record<string, unknown>).__scene;
+          delete (window as unknown as Record<string, unknown>).__player;
+          delete (window as unknown as Record<string, unknown>).__remotePlayerManager;
+        }
 
         if (interactionManager) interactionManager.dispose();
         if (player) player.dispose();

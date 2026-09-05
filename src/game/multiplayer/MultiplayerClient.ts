@@ -1,219 +1,309 @@
-import { IPlayerNetworkPacket, IChatMessagePacket } from './NetworkTypes';
+import {
+  AnimationState,
+  ClientMessage,
+  INetworkStats,
+  IPlayerNetworkState,
+  IVector3,
+  NetworkStatus,
+  ServerMessage,
+} from './NetworkTypes';
 
-/**
- * =========================================================================
- * MultiplayerClient - Real-Time Multiplayer Networking Client
- * =========================================================================
- * WHAT THIS FILE DOES:
- * - Serves as the central communication bridge connecting your local 3D game
- *   instance to a dedicated multiplayer game server (via WebSockets or WebRTC).
- * - Transmits your player's coordinates, orientation, and animations across the internet.
- * - Receives and processes real-time updates from all other players roaming the city.
- * - Implements a clean "Publish-Subscribe" (Observer) event pattern, allowing React
- *   components and 3D scene managers to listen to network events without tight coupling.
- *
- * HOW REAL-TIME MULTIPLAYER WORKS IN 3D WEB GAMES:
- * 1. The Client-Server Model:
- *    - In our architecture, the client (this browser) renders the 3D world and handles
- *      local player input (keyboard/mouse).
- *    - The multiplayer server acts as the traffic controller: it accepts incoming data
- *      from Player A and broadcasts it out to Player B, C, and D in the same district.
- * 2. Publish-Subscribe (Pub/Sub) Pattern:
- *    - Rather than hardcoding references to the 3D scene inside this network class,
- *      this class provides subscription methods (`onPlayerJoined`, `onPlayerMoved`, etc.).
- *    - Any system (like `GameCanvas.tsx` or a Chat UI) can register a listener callback.
- *    - Each subscription method returns an automatic unsubscription function `() => void`,
- *      which integrates cleanly with React `useEffect` cleanups to prevent memory leaks!
- * 3. Network Throttling & Tick Rates:
- *    - A player's computer renders at 60 or 120 FPS. Sending 120 network packets per second
- *      would choke bandwidth and lag the player.
- *    - Instead, games send movement updates at a steady "Tick Rate" (e.g., 20 to 30 Hz).
- *    - The remote clients then use interpolation (smoothing) between received packets
- *      to make remote characters appear buttery-smooth.
- */
+export type WelcomeHandler = (payload: {
+  id: string;
+  name: string;
+  spawnPosition: IVector3;
+  players: IPlayerNetworkState[];
+}) => void;
 
-// Callback type signature: Fired when a new remote runner enters the city.
-export type RemotePlayerJoinedHandler = (packet: IPlayerNetworkPacket) => void;
+export type PlayerJoinedHandler = (player: IPlayerNetworkState) => void;
+export type PlayerLeftHandler = (id: string) => void;
+export type PlayerUpdatesHandler = (updates: IPlayerNetworkState[]) => void;
+export type NetworkStatsHandler = (stats: INetworkStats) => void;
 
-// Callback type signature: Fired when an existing remote runner moves or changes animation.
-export type RemotePlayerMovedHandler = (packet: IPlayerNetworkPacket) => void;
-
-// Callback type signature: Fired when a remote runner disconnects or closes their browser tab.
-export type RemotePlayerLeftHandler = (playerId: string) => void;
-
-// Callback type signature: Fired when a chat message is received from the server.
-export type ChatMessageHandler = (message: IChatMessagePacket) => void;
-
-/**
- * =========================================================================
- * MultiplayerClient Class
- * =========================================================================
- * The networking orchestrator. Handles socket lifecycle, sending packets,
- * and routing incoming server events to registered handlers.
- */
 export class MultiplayerClient {
-  /**
-   * Tracks whether the network connection to the multiplayer server is active.
-   * Prevents attempting to send packets when offline.
-   */
-  private isConnected: boolean = false;
+  private socket: WebSocket | null = null;
+  private serverUrl: string = 'ws://localhost:3001';
+  private status: NetworkStatus = 'DISCONNECTED';
+  private assignedId: string | null = null;
+  private assignedName: string | null = null;
+  private playerCount: number = 1;
+  private ping: number = 0;
 
-  /**
-   * The destination URL of the game server (e.g., "wss://game.socialworld.com/ws").
-   */
-  private serverUrl: string | null = null;
+  // Rate limiting / throttling (20 Hz = send at most every 50ms)
+  private lastSendTime: number = 0;
+  private readonly SEND_INTERVAL_MS = 50;
 
-  /**
-   * Internal Sets storing registered listener functions for each network event.
-   * Using a JavaScript `Set` guarantees that the same callback cannot be registered
-   * twice by accident, and provides O(1) instantaneous removal when unsubscribing.
-   */
-  private onPlayerJoinedHandlers: Set<RemotePlayerJoinedHandler> = new Set();
-  private onPlayerMovedHandlers: Set<RemotePlayerMovedHandler> = new Set();
-  private onPlayerLeftHandlers: Set<RemotePlayerLeftHandler> = new Set();
-  private onChatMessageHandlers: Set<ChatMessageHandler> = new Set();
+  // Ping interval
+  private pingTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private shouldReconnect: boolean = true;
+  private reconnectAttempts: number = 0;
 
-  /**
-   * Initializes a new instance of the MultiplayerClient.
-   * Handlers and connection state start empty/disconnected until `connect()` is invoked.
-   */
+  // Event handlers
+  private welcomeHandlers: Set<WelcomeHandler> = new Set();
+  private playerJoinedHandlers: Set<PlayerJoinedHandler> = new Set();
+  private playerLeftHandlers: Set<PlayerLeftHandler> = new Set();
+  private playerUpdatesHandlers: Set<PlayerUpdatesHandler> = new Set();
+  private statsHandlers: Set<NetworkStatsHandler> = new Set();
+
   constructor() {}
 
   /**
-   * =========================================================================
-   * connect() - Establish Connection to Game Server
-   * =========================================================================
-   * Connects to the authoritative multiplayer game server via WebSocket.
-   *
-   * In a live production environment:
-   * - Creates a new WebSocket instance: `this.socket = new WebSocket(serverUrl);`
-   * - Configures listeners:
-   *     - `socket.onopen`: Sets `isConnected = true` and sends authentication/handshake.
-   *     - `socket.onmessage`: Parses incoming JSON packets and dispatches to handler Sets.
-   *     - `socket.onclose`: Cleans up state and schedules automatic reconnection.
-   *     - `socket.onerror`: Logs network issues and alerts the player.
-   *
-   * @param serverUrl - The WebSocket endpoint URI (e.g., "ws://localhost:8080" or "wss://...")
-   * @returns A promise resolving to true if connection succeeded, or false if offline.
+   * Connects to the dedicated WebSocket server.
    */
-  public async connect(serverUrl: string): Promise<boolean> {
-    this.serverUrl = serverUrl;
-    console.log(`[MultiplayerClient] Configured server endpoint: ${serverUrl}`);
-    // Ready for WebSocket instantiation: this.socket = new WebSocket(serverUrl);
-    this.isConnected = false;
-    return false;
+  public connect(url?: string): Promise<boolean> {
+    if (url) {
+      this.serverUrl = url;
+    } else if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname || 'localhost';
+      this.serverUrl = `ws://${hostname}:3001`;
+    }
+
+    this.shouldReconnect = true;
+    this.setStatus('CONNECTING');
+
+    return new Promise((resolve) => {
+      try {
+        console.log(`[MultiplayerClient] Connecting to ${this.serverUrl}...`);
+        this.socket = new WebSocket(this.serverUrl);
+
+        this.socket.onopen = () => {
+          console.log('[MultiplayerClient] Connected successfully.');
+          this.reconnectAttempts = 0;
+          this.setStatus('ONLINE');
+          this.startPingLoop();
+          resolve(true);
+        };
+
+        this.socket.onmessage = (event) => {
+          this.handleMessage(event.data);
+        };
+
+        this.socket.onclose = () => {
+          console.log('[MultiplayerClient] Disconnected from server.');
+          this.stopPingLoop();
+          this.setStatus('DISCONNECTED');
+          this.scheduleReconnect();
+          resolve(false);
+        };
+
+        this.socket.onerror = (err) => {
+          console.warn('[MultiplayerClient] Socket error encountered:', err);
+          this.setStatus('ERROR');
+        };
+      } catch (err) {
+        console.error('[MultiplayerClient] Connection exception:', err);
+        this.setStatus('ERROR');
+        this.scheduleReconnect();
+        resolve(false);
+      }
+    });
   }
 
   /**
-   * =========================================================================
-   * broadcastPlayerState() - Transmit Local Player Transform
-   * =========================================================================
-   * Sends the local player's current 3D position, 4D rotation quaternion,
-   * velocity vector, and animation state ('idle' | 'walk' | 'run' | 'jump')
-   * to the server so all other players can see your movements in real-time.
-   *
-   * Best Practice:
-   * This should be called from your game loop on a fixed interval timer
-   * (e.g., every 50ms = 20 times a second), or whenever a significant change occurs.
-   *
-   * @param packet - The serialized transform data of the local player.
+   * Processes incoming server messages and dispatches to registered callbacks.
    */
-  public broadcastPlayerState(packet: IPlayerNetworkPacket): void {
-    if (!this.isConnected) return;
-    // Ready for: this.socket.send(JSON.stringify({ type: 'player_state', ...packet }));
+  private handleMessage(rawData: string): void {
+    try {
+      const msg = JSON.parse(rawData) as ServerMessage;
+      if (!msg || !msg.type) return;
+
+      switch (msg.type) {
+        case 'welcome': {
+          this.assignedId = msg.payload.id;
+          this.assignedName = msg.payload.name;
+          this.playerCount = msg.payload.players.length + 1;
+          this.emitStats();
+
+          console.log(`[MultiplayerClient] Received welcome: ID=${this.assignedId}, Name=${this.assignedName}, existing=${msg.payload.players.length}`);
+          this.welcomeHandlers.forEach((handler) => handler(msg.payload));
+          break;
+        }
+
+        case 'player_joined': {
+          this.playerCount += 1;
+          this.emitStats();
+          this.playerJoinedHandlers.forEach((handler) => handler(msg.payload.player));
+          break;
+        }
+
+        case 'player_left': {
+          this.playerCount = Math.max(1, this.playerCount - 1);
+          this.emitStats();
+          this.playerLeftHandlers.forEach((handler) => handler(msg.payload.id));
+          break;
+        }
+
+        case 'player_updates': {
+          this.playerUpdatesHandlers.forEach((handler) => handler(msg.payload.updates));
+          break;
+        }
+
+        case 'pong': {
+          if (msg.payload?.timestamp) {
+            this.ping = Math.max(0, Date.now() - msg.payload.timestamp);
+            this.emitStats();
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      console.warn('[MultiplayerClient] Error parsing message:', err);
+    }
   }
 
   /**
-   * =========================================================================
-   * sendChatMessage() - Broadcast Chat Message
-   * =========================================================================
-   * Dispatches a text message typed by the player in the chat box.
-   * The server will receive this, attach sender info, and broadcast it to
-   * all other players in the district.
-   *
-   * @param text - The raw message string entered by the user.
+   * Transmits local player movement and animation state to the server (throttled to 20 Hz).
    */
-  public sendChatMessage(text: string): void {
-    if (!this.isConnected) return;
-    // Ready for: this.socket.send(JSON.stringify({ type: 'chat', text }));
+  public sendPlayerUpdate(
+    position: IVector3,
+    rotation: number,
+    animationState: AnimationState,
+    velocity?: IVector3
+  ): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+
+    const now = performance.now();
+    if (now - this.lastSendTime < this.SEND_INTERVAL_MS) {
+      return; // Skip this frame to stay within 20 Hz limit
+    }
+    this.lastSendTime = now;
+
+    const msg: ClientMessage = {
+      type: 'player_update',
+      payload: {
+        position: {
+          x: Number(position.x.toFixed(3)),
+          y: Number(position.y.toFixed(3)),
+          z: Number(position.z.toFixed(3)),
+        },
+        rotation: Number(rotation.toFixed(3)),
+        animationState,
+        velocity: velocity
+          ? {
+              x: Number(velocity.x.toFixed(2)),
+              y: Number(velocity.y.toFixed(2)),
+              z: Number(velocity.z.toFixed(2)),
+            }
+          : undefined,
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      console.error('[MultiplayerClient] Send error:', err);
+    }
   }
 
   /**
-   * =========================================================================
-   * onPlayerJoined() - Subscribe to New Player Connections
-   * =========================================================================
-   * Registers a callback to be notified whenever another player connects to the world.
-   * The 3D scene uses this to instantiate and spawn a new remote avatar mesh.
-   *
-   * @param handler - Function invoked with the new player's initial state packet.
-   * @returns Unsubscribe cleanup function that removes the handler from the Set.
+   * Starts periodic ping to measure real-time latency.
    */
-  public onPlayerJoined(handler: RemotePlayerJoinedHandler): () => void {
-    this.onPlayerJoinedHandlers.add(handler);
-    return () => this.onPlayerJoinedHandlers.delete(handler);
+  private startPingLoop(): void {
+    this.stopPingLoop();
+    this.pingTimer = setInterval(() => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        const pingMsg: ClientMessage = {
+          type: 'ping',
+          payload: { timestamp: Date.now() },
+        };
+        try {
+          this.socket.send(JSON.stringify(pingMsg));
+        } catch {}
+      }
+    }, 2000);
   }
 
-  /**
-   * =========================================================================
-   * onPlayerMoved() - Subscribe to Remote Player Movement
-   * =========================================================================
-   * Registers a callback to receive transform updates from remote runners.
-   * The 3D scene uses this to move and play animations on remote player models.
-   *
-   * @param handler - Function invoked with the updated position/rotation/animation.
-   * @returns Unsubscribe cleanup function that removes the handler from the Set.
-   */
-  public onPlayerMoved(handler: RemotePlayerMovedHandler): () => void {
-    this.onPlayerMovedHandlers.add(handler);
-    return () => this.onPlayerMovedHandlers.delete(handler);
+  private stopPingLoop(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
   }
 
-  /**
-   * =========================================================================
-   * onPlayerLeft() - Subscribe to Player Disconnections
-   * =========================================================================
-   * Registers a callback to be notified when a remote player logs out or disconnects.
-   * The 3D scene uses this to dispose of the player's 3D mesh and free GPU memory.
-   *
-   * @param handler - Function invoked with the unique ID of the player who left.
-   * @returns Unsubscribe cleanup function that removes the handler from the Set.
-   */
-  public onPlayerLeft(handler: RemotePlayerLeftHandler): () => void {
-    this.onPlayerLeftHandlers.add(handler);
-    return () => this.onPlayerLeftHandlers.delete(handler);
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectTimer) return;
+    this.reconnectAttempts++;
+    const delay = Math.min(10000, 2000 * Math.pow(1.5, this.reconnectAttempts - 1));
+    console.log(`[MultiplayerClient] Scheduling reconnect in ${(delay / 1000).toFixed(1)}s...`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
-  /**
-   * =========================================================================
-   * onChatMessage() - Subscribe to Incoming Chat Messages
-   * =========================================================================
-   * Registers a callback to receive incoming chat messages from other runners.
-   * The UI chat window uses this to append new text bubbles to the screen.
-   *
-   * @param handler - Function invoked with the chat message packet.
-   * @returns Unsubscribe cleanup function that removes the handler from the Set.
-   */
-  public onChatMessage(handler: ChatMessageHandler): () => void {
-    this.onChatMessageHandlers.add(handler);
-    return () => this.onChatMessageHandlers.delete(handler);
+  private setStatus(status: NetworkStatus): void {
+    this.status = status;
+    this.emitStats();
   }
 
-  /**
-   * =========================================================================
-   * disconnect() - Graceful Disconnection & Teardown
-   * =========================================================================
-   * Closes the active network socket, resets the connection flag, and empties
-   * all registered callback Sets.
-   *
-   * Crucial for memory hygiene: Clearing handlers prevents dangling closures
-   * from keeping obsolete UI or 3D scene references alive in memory.
-   */
+  private emitStats(): void {
+    const stats: INetworkStats = {
+      status: this.status,
+      playerCount: this.playerCount,
+      ping: this.ping,
+    };
+    this.statsHandlers.forEach((h) => h(stats));
+  }
+
+  public getStats(): INetworkStats {
+    return {
+      status: this.status,
+      playerCount: this.playerCount,
+      ping: this.ping,
+    };
+  }
+
+  public getAssignedId(): string | null {
+    return this.assignedId;
+  }
+
+  public getAssignedName(): string | null {
+    return this.assignedName;
+  }
+
+  public onWelcome(handler: WelcomeHandler): () => void {
+    this.welcomeHandlers.add(handler);
+    return () => this.welcomeHandlers.delete(handler);
+  }
+
+  public onPlayerJoined(handler: PlayerJoinedHandler): () => void {
+    this.playerJoinedHandlers.add(handler);
+    return () => this.playerJoinedHandlers.delete(handler);
+  }
+
+  public onPlayerLeft(handler: PlayerLeftHandler): () => void {
+    this.playerLeftHandlers.add(handler);
+    return () => this.playerLeftHandlers.delete(handler);
+  }
+
+  public onPlayerUpdates(handler: PlayerUpdatesHandler): () => void {
+    this.playerUpdatesHandlers.add(handler);
+    return () => this.playerUpdatesHandlers.delete(handler);
+  }
+
+  public onStatsChange(handler: NetworkStatsHandler): () => void {
+    this.statsHandlers.add(handler);
+    return () => this.statsHandlers.delete(handler);
+  }
+
   public disconnect(): void {
-    this.isConnected = false;
-    this.onPlayerJoinedHandlers.clear();
-    this.onPlayerMovedHandlers.clear();
-    this.onPlayerLeftHandlers.clear();
-    this.onChatMessageHandlers.clear();
+    this.shouldReconnect = false;
+    this.stopPingLoop();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+    this.setStatus('DISCONNECTED');
+    this.welcomeHandlers.clear();
+    this.playerJoinedHandlers.clear();
+    this.playerLeftHandlers.clear();
+    this.playerUpdatesHandlers.clear();
+    this.statsHandlers.clear();
   }
 }
-

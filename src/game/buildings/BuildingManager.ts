@@ -246,16 +246,16 @@ export class BuildingManager {
 
       const hexNeon = neonColor.toHexString();
 
-      // Outer cyber glowing border
-      ctx.shadowColor = hexNeon;
-      ctx.shadowBlur = 16;
+      // Outer cyber accent border
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 4;
       ctx.strokeStyle = hexNeon;
-      ctx.lineWidth = 8;
+      ctx.lineWidth = 6;
       ctx.strokeRect(14, 14, 996, 228);
 
       // Inner thin accent frame
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
       ctx.lineWidth = 2;
       ctx.strokeRect(26, 26, 972, 204);
 
@@ -269,10 +269,10 @@ export class BuildingManager {
 
       // Dynamic text sizing to ensure perfect visibility without clipping
       const upperText = signText.toUpperCase();
-      let fontSize = 80;
+      let fontSize = 76;
       ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
       let textMetrics = ctx.measureText(upperText);
-      while (textMetrics.width > 900 && fontSize > 36) {
+      while (textMetrics.width > 880 && fontSize > 36) {
         fontSize -= 4;
         ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         textMetrics = ctx.measureText(upperText);
@@ -281,16 +281,25 @@ export class BuildingManager {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      // Neon Glow Layer (Pass 1 - wide saturated halo)
-      ctx.shadowColor = hexNeon;
-      ctx.shadowBlur = 24;
-      ctx.fillStyle = hexNeon;
-      ctx.fillText(upperText, 512, 128);
+      // Sharp, readable text with dark drop shadow (NO excessive neon bloom halo)
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 3;
 
-      // Intense Core Layer (Pass 2 - bright white-hot center for authentic neon visibility)
-      ctx.shadowBlur = 8;
+      // Clean outline for contrast
+      ctx.strokeStyle = hexNeon;
+      ctx.lineWidth = 3;
+      ctx.strokeText(upperText, 512, 128);
+
+      // Crisp white fill
       ctx.fillStyle = '#ffffff';
       ctx.fillText(upperText, 512, 128);
+
+      // Reset shadow
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
 
       signTexture.update();
     }
@@ -299,10 +308,13 @@ export class BuildingManager {
     signMat.emissiveTexture = signTexture;
     signMat.diffuseTexture = signTexture;
     signMat.diffuseColor = new Color3(1, 1, 1);
-    signMat.emissiveColor = new Color3(1, 1, 1);
-    signMat.disableLighting = true; // Guarantees maximum emissive luminosity independent of shadows or time of day
+    signMat.emissiveColor = new Color3(0.85, 0.85, 0.85);
+    signMat.disableLighting = true; // Guarantees consistent readability in all lighting conditions
     signMat.backFaceCulling = false;
     sign.material = signMat;
+
+    // Exclude sign from GlowLayer to guarantee razor-sharp text readability without bloom blowout
+    this.environment.addExcludedGlowMesh(sign);
 
     // Floating Hologram Waypoint Marker above Entrance
     const waypoint = MeshBuilder.CreatePolyhedron(

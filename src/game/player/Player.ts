@@ -12,6 +12,8 @@ import { PlayerAnimation, IPlayerLimbNodes } from './PlayerAnimation';
 import { PlayerController } from './PlayerController';
 import { PlayerCamera } from './PlayerCamera';
 import { Environment } from '../world/Environment';
+import { PlayerAppearance, getDeterministicAppearance } from './PlayerAppearance';
+import { WorldSpaceLabel } from '../world/WorldSpaceLabel';
 import { IInventoryItem, IPlayerState } from '@/types/game';
 
 /**
@@ -34,6 +36,16 @@ export class Player {
   public camera: PlayerCamera;
   public controller: PlayerController;
   public animation: PlayerAnimation;
+  public appearance: PlayerAppearance;
+  public nametag: WorldSpaceLabel;
+
+  private suitMat!: PBRMaterial;
+  private armorMat!: PBRMaterial;
+  private neonMat!: StandardMaterial;
+  private torsoNode!: TransformNode;
+  private headNode!: TransformNode;
+  private leftLegNode!: TransformNode;
+  private rightLegNode!: TransformNode;
 
   // Player gameplay state
   public id: string = 'player_local';
@@ -54,6 +66,7 @@ export class Player {
 
   constructor(scene: Scene, canvas: HTMLCanvasElement, environment: Environment) {
     this.scene = scene;
+    this.appearance = getDeterministicAppearance(this.id);
 
     // 1. Root Collision Capsule (Invisible physics capsule)
     // The physics engine checks this pill-shaped capsule against walls and sidewalks.
@@ -70,6 +83,15 @@ export class Player {
 
     // 2. Build Humanoid Cyber Rig & Limbs (visual body parented to rootMesh)
     const limbs = this.buildAvatarRig(this.rootMesh, environment);
+
+    // 2b. Overhead readable nametag
+    this.nametag = new WorldSpaceLabel(this.scene, {
+      text: this.name,
+      parent: this.rootMesh,
+      offsetY: 2.35 * this.appearance.heightScale,
+      accentColorHex: this.appearance.accentColorHex,
+    });
+    this.applyAppearance(this.appearance);
 
     // 3. Initialize Animation System (drives limb rotations)
     this.animation = new PlayerAnimation(limbs);
@@ -102,27 +124,28 @@ export class Player {
    */
   private buildAvatarRig(parent: AbstractMesh, environment: Environment): IPlayerLimbNodes {
     // Materials
-    const suitMat = new PBRMaterial('mat_player_suit', this.scene);
-    suitMat.albedoColor = new Color3(0.12, 0.14, 0.18);
-    suitMat.metallic = 0.5;
-    suitMat.roughness = 0.45;
+    this.suitMat = new PBRMaterial('mat_player_suit', this.scene);
+    this.suitMat.albedoColor = this.appearance.bodyColor;
+    this.suitMat.metallic = 0.45;
+    this.suitMat.roughness = 0.5;
 
-    const armorMat = new PBRMaterial('mat_player_armor', this.scene);
-    armorMat.albedoColor = new Color3(0.05, 0.06, 0.08);
-    armorMat.metallic = 0.85;
-    armorMat.roughness = 0.25;
+    this.armorMat = new PBRMaterial('mat_player_armor', this.scene);
+    this.armorMat.albedoColor = this.appearance.secondaryColor;
+    this.armorMat.metallic = 0.85;
+    this.armorMat.roughness = 0.25;
 
-    const neonMat = new StandardMaterial('mat_player_neon', this.scene);
-    neonMat.emissiveColor = new Color3(0.0, 0.85, 1.0); // Cyber Cyan
+    this.neonMat = new StandardMaterial('mat_player_neon', this.scene);
+    this.neonMat.emissiveColor = this.appearance.accentColor;
 
     // --- Torso / Chest ---
     const torsoNode = new TransformNode('player_torso_node', this.scene);
     torsoNode.parent = parent;
     torsoNode.position.y = 1.05;
+    this.torsoNode = torsoNode;
 
     const torsoMesh = MeshBuilder.CreateBox('player_torso', { width: 0.65, depth: 0.35, height: 0.65 }, this.scene);
     torsoMesh.parent = torsoNode;
-    torsoMesh.material = suitMat;
+    torsoMesh.material = this.suitMat;
     environment.addShadowCaster(torsoMesh);
 
     // Glowing chest arc reactor
@@ -130,28 +153,29 @@ export class Player {
     arcReactor.rotation.x = Math.PI / 2;
     arcReactor.position = new Vector3(0, 0.05, 0.18);
     arcReactor.parent = torsoNode;
-    arcReactor.material = neonMat;
+    arcReactor.material = this.neonMat;
 
     // Tactical Backpack
     const backpack = MeshBuilder.CreateBox('player_backpack', { width: 0.45, depth: 0.2, height: 0.5 }, this.scene);
     backpack.position = new Vector3(0, 0.05, -0.25);
     backpack.parent = torsoNode;
-    backpack.material = armorMat;
+    backpack.material = this.armorMat;
 
     // --- Head & Visor ---
     const headNode = new TransformNode('player_head_node', this.scene);
     headNode.parent = torsoNode;
     headNode.position.y = 0.55;
+    this.headNode = headNode;
 
     const headMesh = MeshBuilder.CreateSphere('player_head', { diameter: 0.38 }, this.scene);
     headMesh.parent = headNode;
-    headMesh.material = armorMat;
+    headMesh.material = this.armorMat;
 
     // Glowing Visor
     const visor = MeshBuilder.CreateBox('player_visor', { width: 0.3, depth: 0.12, height: 0.1 }, this.scene);
     visor.position = new Vector3(0, 0.02, 0.16);
     visor.parent = headNode;
-    visor.material = neonMat;
+    visor.material = this.neonMat;
 
     // --- Left Arm ---
     const leftArmNode = new TransformNode('player_left_arm_node', this.scene);
@@ -161,7 +185,7 @@ export class Player {
     const leftArmMesh = MeshBuilder.CreateCylinder('player_l_arm', { height: 0.58, diameter: 0.15 }, this.scene);
     leftArmMesh.position.y = -0.26;
     leftArmMesh.parent = leftArmNode;
-    leftArmMesh.material = suitMat;
+    leftArmMesh.material = this.suitMat;
 
     // --- Right Arm ---
     const rightArmNode = new TransformNode('player_right_arm_node', this.scene);
@@ -171,39 +195,41 @@ export class Player {
     const rightArmMesh = MeshBuilder.CreateCylinder('player_r_arm', { height: 0.58, diameter: 0.15 }, this.scene);
     rightArmMesh.position.y = -0.26;
     rightArmMesh.parent = rightArmNode;
-    rightArmMesh.material = suitMat;
+    rightArmMesh.material = this.suitMat;
 
     // --- Left Leg ---
     const leftLegNode = new TransformNode('player_left_leg_node', this.scene);
     leftLegNode.parent = parent;
     leftLegNode.position = new Vector3(-0.2, 0.65, 0);
+    this.leftLegNode = leftLegNode;
 
     const leftLegMesh = MeshBuilder.CreateCylinder('player_l_leg', { height: 0.65, diameter: 0.18 }, this.scene);
     leftLegMesh.position.y = -0.32;
     leftLegMesh.parent = leftLegNode;
-    leftLegMesh.material = armorMat;
+    leftLegMesh.material = this.armorMat;
 
     // Boot
     const leftBoot = MeshBuilder.CreateBox('player_l_boot', { width: 0.2, depth: 0.32, height: 0.14 }, this.scene);
     leftBoot.position = new Vector3(0, -0.62, 0.05);
     leftBoot.parent = leftLegNode;
-    leftBoot.material = suitMat;
+    leftBoot.material = this.suitMat;
 
     // --- Right Leg ---
     const rightLegNode = new TransformNode('player_right_leg_node', this.scene);
     rightLegNode.parent = parent;
     rightLegNode.position = new Vector3(0.2, 0.65, 0);
+    this.rightLegNode = rightLegNode;
 
     const rightLegMesh = MeshBuilder.CreateCylinder('player_r_leg', { height: 0.65, diameter: 0.18 }, this.scene);
     rightLegMesh.position.y = -0.32;
     rightLegMesh.parent = rightLegNode;
-    rightLegMesh.material = armorMat;
+    rightLegMesh.material = this.armorMat;
 
     // Boot
     const rightBoot = MeshBuilder.CreateBox('player_r_boot', { width: 0.2, depth: 0.32, height: 0.14 }, this.scene);
     rightBoot.position = new Vector3(0, -0.62, 0.05);
     rightBoot.parent = rightLegNode;
-    rightBoot.material = suitMat;
+    rightBoot.material = this.suitMat;
 
     return {
       torso: torsoNode,
@@ -218,6 +244,44 @@ export class Player {
   public update(deltaTime: number): void {
     this.controller.update(deltaTime);
     this.camera.update();
+    this.nametag.update(this.camera.camera);
+  }
+
+  /**
+   * Applies deterministic appearance parameters (distinct body colors and subtle scale proportions).
+   */
+  public applyAppearance(appearance: PlayerAppearance): void {
+    this.appearance = appearance;
+    if (this.suitMat) this.suitMat.albedoColor = appearance.bodyColor;
+    if (this.armorMat) this.armorMat.albedoColor = appearance.secondaryColor;
+    if (this.neonMat) this.neonMat.emissiveColor = appearance.accentColor;
+
+    if (this.torsoNode) {
+      this.torsoNode.scaling.set(appearance.widthScale, appearance.heightScale, appearance.widthScale);
+    }
+    if (this.headNode) {
+      this.headNode.scaling.set(appearance.headScale, appearance.headScale, appearance.headScale);
+    }
+    if (this.leftLegNode) {
+      this.leftLegNode.scaling.set(1, appearance.heightScale, 1);
+    }
+    if (this.rightLegNode) {
+      this.rightLegNode.scaling.set(1, appearance.heightScale, 1);
+    }
+    if (this.nametag) {
+      this.nametag.mesh.position.y = 2.35 * appearance.heightScale;
+      this.nametag.setText(this.name, appearance.accentColorHex);
+    }
+  }
+
+  /**
+   * Updates player's display name on the overhead nametag.
+   */
+  public updateName(name: string): void {
+    this.name = name;
+    if (this.nametag) {
+      this.nametag.setText(name, this.appearance.accentColorHex);
+    }
   }
 
   public getState(): IPlayerState {
@@ -270,6 +334,9 @@ export class Player {
   }
 
   public dispose(): void {
+    if (this.nametag) {
+      this.nametag.dispose();
+    }
     this.controller.dispose();
     this.camera.dispose();
     this.rootMesh.dispose(false, true);

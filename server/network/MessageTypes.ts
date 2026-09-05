@@ -1,20 +1,22 @@
-import { AnimationState, IVector3 } from '@/types/game';
+/**
+ * =========================================================================
+ * MessageTypes - Server & Client Network Protocol Contracts
+ * =========================================================================
+ */
 
-export type { AnimationState, IVector3 };
+export type AnimationState = 'idle' | 'walk' | 'run' | 'jump';
 
-export type NetworkStatus = 'CONNECTING' | 'ONLINE' | 'DISCONNECTED' | 'ERROR';
-
-export interface INetworkStats {
-  status: NetworkStatus;
-  playerCount: number;
-  ping: number;
+export interface IVector3 {
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface IPlayerNetworkState {
   id: string;
   name: string;
   position: IVector3;
-  rotation: number; // Yaw in radians
+  rotation: number; // Yaw angle in radians
   animationState: AnimationState;
   velocity?: IVector3;
   timestamp: number;

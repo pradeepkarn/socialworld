@@ -13,6 +13,7 @@ import {
   IVector3,
   TimeOfDay,
 } from '@/types/game';
+import { INetworkStats } from '@/game/multiplayer/NetworkTypes';
 import { Sun, Sunset, Moon, Wallet, Sparkles, Navigation } from 'lucide-react';
 
 /**
@@ -83,6 +84,13 @@ export const GameUI: React.FC = () => {
 
   // Player rotation angle (radians around Y axis) for the minimap player directional arrow
   const [playerRotY, setPlayerRotY] = useState<number>(0);
+
+  // Phase 2: Multiplayer Network Status & Latency
+  const [netStats, setNetStats] = useState<INetworkStats>({
+    status: 'CONNECTING',
+    playerCount: 1,
+    ping: 0,
+  });
 
   // Reference to the imperative API exposed by GameCanvas
   const canvasHandleRef = useRef<GameCanvasHandle | null>(null);
@@ -159,6 +167,7 @@ export const GameUI: React.FC = () => {
           onPlayerStatsUpdate={handleStatsUpdate}
           onMinimapUpdate={handleMinimapUpdate}
           onTimeOfDayChange={setTimeOfDay}
+          onNetworkStatsUpdate={setNetStats}
           canvasRefCallback={handleCanvasRef}
         />
       </div>
@@ -178,6 +187,36 @@ export const GameUI: React.FC = () => {
 
         {/* Top-Right HUD Controls */}
         <div style={styles.topRight}>
+          {/* Multiplayer Network Status Badge (Phase 2) */}
+          <div id="network-status-hud" style={styles.networkBadge}>
+            <span
+              style={{
+                ...styles.statusDot,
+                backgroundColor:
+                  netStats.status === 'ONLINE'
+                    ? '#22c55e'
+                    : netStats.status === 'CONNECTING'
+                    ? '#eab308'
+                    : '#ef4444',
+                boxShadow:
+                  netStats.status === 'ONLINE'
+                    ? '0 0 8px #22c55e'
+                    : netStats.status === 'CONNECTING'
+                    ? '0 0 8px #eab308'
+                    : '0 0 8px #ef4444',
+              }}
+            />
+            <span style={styles.statusText}>{netStats.status}</span>
+            {netStats.status === 'ONLINE' && (
+              <>
+                <span style={styles.statusDivider}>•</span>
+                <span style={styles.statusDetail}>{netStats.playerCount} {netStats.playerCount === 1 ? 'Player' : 'Players'}</span>
+                <span style={styles.statusDivider}>•</span>
+                <span style={styles.statusDetail}>{netStats.ping}ms</span>
+              </>
+            )}
+          </div>
+
           {/* Day / Sunset / Night Atmosphere Switcher Button */}
           <button
             id="time-toggle-btn"
@@ -358,6 +397,37 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: '600',
     color: '#94a3b8',
     backdropFilter: 'blur(8px)',
+  },
+  // Multiplayer Network Status Badge (Phase 2)
+  networkBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: 'rgba(10, 15, 26, 0.85)',
+    border: '1px solid rgba(255, 255, 255, 0.15)',
+    borderRadius: '12px',
+    padding: '8px 14px',
+    fontSize: '12px',
+    fontWeight: '700',
+    backdropFilter: 'blur(8px)',
+  },
+  statusDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  statusText: {
+    letterSpacing: '0.8px',
+    color: '#f1f5f9',
+  },
+  statusDivider: {
+    color: 'rgba(255, 255, 255, 0.25)',
+    margin: '0 2px',
+  },
+  statusDetail: {
+    color: '#94a3b8',
+    fontWeight: '600',
   },
   // Bottom HUD wrapper positioning ControlsHelp on the left and Minimap on the right
   bottomHud: {
