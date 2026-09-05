@@ -1,18 +1,21 @@
 import {
   Scene,
   MeshBuilder,
-  PBRMaterial,
-  StandardMaterial,
-  Color3,
   Vector3,
   TransformNode,
   AbstractMesh,
+  SceneLoader,
+  ISceneLoaderAsyncResult,
 } from '@babylonjs/core';
-import { PlayerAnimation, IPlayerLimbNodes } from './PlayerAnimation';
+import '@babylonjs/loaders/glTF';
+import { PlayerAnimation } from './PlayerAnimation';
 import { PlayerController } from './PlayerController';
 import { PlayerCamera } from './PlayerCamera';
 import { Environment } from '../world/Environment';
 import { IInventoryItem, IPlayerState } from '@/types/game';
+import { buildAndroidBoyRig, IPlayerLimbNodes } from './AndroidBoyRig';
+
+export type AvatarType = 'cute_creature' | 'android_boy';
 
 /**
  * =========================================================================
@@ -20,13 +23,16 @@ import { IInventoryItem, IPlayerState } from '@/types/game';
  * =========================================================================
  * WHAT IT DOES:
  * - Represents the local player character in the game world.
+ * - Primary Character Model: "Cute Creature" (rigged 3D monster with custom textures
+ *   and idle, walk, run, jump animation clips loaded from /models/cute_creature.glb).
+ * - Backup Character Rig: "Android Boy" (original procedural cyber suit kept fully
+ *   intact in AndroidBoyRig.ts for backup and switching).
  * - Coordinates 5 core subsystems:
  *   1. Physical Collision Capsule (`rootMesh`): Invisible hull that walks and bumps into walls.
- *   2. Visual Character Rig (`buildAvatarRig`): Cyber suit, glowing visor, and limbs.
- *   3. Procedural Animation (`PlayerAnimation`): Swings arms & legs while running.
+ *   2. Visual Character Rig: Cute Creature 3D Model / Android Boy backup.
+ *   3. Animation System (`PlayerAnimation`): Drives GLTF animation groups or procedural limbs.
  *   4. Smooth Orbit Camera (`PlayerCamera`): Third-person camera following behind.
  *   5. Input Controller (`PlayerController`): Translates WASD keys into 3D movement.
- * - Manages RPG state: Wallet balance (`credits`) and item inventory.
  */
 export class Player {
   public scene: Scene;
@@ -34,6 +40,20 @@ export class Player {
   public camera: PlayerCamera;
   public controller: PlayerController;
   public animation: PlayerAnimation;
+
+  // Active avatar representation
+  private avatarType: AvatarType = 'cute_creature';
+  private avatarRoot: TransformNode;
+  private environment: Environment;
+
+  // Cute creature meshes and loaded result
+  private cuteCreatureMeshes: AbstractMesh[] = [];
+  private cuteCreatureLoaded: boolean = false;
+
+  // Android boy backup elements
+  private androidBoyRoot?: TransformNode;
+  private androidBoyLimbs?: IPlayerLimbNodes;
+  private androidBoyMeshes: AbstractMesh[] = [];
 
   // Player gameplay state
   public id: string = 'player_local';
@@ -54,6 +74,7 @@ export class Player {
 
   constructor(scene: Scene, canvas: HTMLCanvasElement, environment: Environment) {
     this.scene = scene;
+    this.environment = environment;
 
     // 1. Root Collision Capsule (Invisible physics capsule)
     // The physics engine checks this pill-shaped capsule against walls and sidewalks.
@@ -63,16 +84,17 @@ export class Player {
       this.scene
     );
     this.rootMesh.position = new Vector3(0, 1.0, 8); // Spawn on central avenue promenade facing north
-    this.rootMesh.isVisible = false;                // Invisible (we only see the avatar rig inside it)
+    this.rootMesh.isVisible = false;                // Invisible (we only see the avatar model inside it)
     this.rootMesh.checkCollisions = true;           // Enables Babylon collision physics
     this.rootMesh.ellipsoid = new Vector3(0.45, 0.95, 0.45);
     this.rootMesh.ellipsoidOffset = new Vector3(0, 0.95, 0);
 
-    // 2. Build Humanoid Cyber Rig & Limbs (visual body parented to rootMesh)
-    const limbs = this.buildAvatarRig(this.rootMesh, environment);
+    // 2. Avatar Container
+    this.avatarRoot = new TransformNode('player_avatar_root', this.scene);
+    this.avatarRoot.parent = this.rootMesh;
 
-    // 3. Initialize Animation System (drives limb rotations)
-    this.animation = new PlayerAnimation(limbs);
+    // 3. Initialize Animation System
+    this.animation = new PlayerAnimation();
 
     // 4. Initialize Camera System (smooth third-person follow camera)
     this.camera = new PlayerCamera(scene, canvas);
@@ -80,139 +102,133 @@ export class Player {
 
     // 5. Initialize Input Controller (WASD keyboard + mouse look)
     this.controller = new PlayerController(scene, this.rootMesh, this.camera, this.animation);
+
+    // 6. Load Primary Avatar: Cute Creature
+    this.loadCuteCreatureAvatar();
   }
 
   /**
    * =========================================================================
-   * buildAvatarRig() - Procedural Cyber Character Model
+   * loadCuteCreatureAvatar() - Loads the Cute Creature 3D Model
    * =========================================================================
-   * WHAT IT DOES:
-   * - Constructs an articulated 3D character using geometric primitives:
-   *   - Torso box with dark armored suit material
-   *   - Glowing cyan Arc Reactor on the chest
-   *   - Tactical backpack on the back
-   *   - Head sphere with glowing cyber visor
-   *   - Left & Right Arms (parented to shoulder pivot nodes)
-   *   - Left & Right Legs (parented to hip pivot nodes)
-   *
-   * KEY CONCEPT: Pivot TransformNodes (`TransformNode`):
-   * - If you rotate a cylinder arm directly, it rotates around its center (elbow).
-   * - By placing a `TransformNode` at the shoulder/hip joint and parenting the arm/leg
-   *   to it, swinging the limb pivots naturally from the shoulder/hip socket!
+   * Imports the rigged GLB model with textures and animations (idle, walk, run, jump).
    */
-  private buildAvatarRig(parent: AbstractMesh, environment: Environment): IPlayerLimbNodes {
-    // Materials
-    const suitMat = new PBRMaterial('mat_player_suit', this.scene);
-    suitMat.albedoColor = new Color3(0.12, 0.14, 0.18);
-    suitMat.metallic = 0.5;
-    suitMat.roughness = 0.45;
+  private async loadCuteCreatureAvatar(): Promise<void> {
+    try {
+      const result: ISceneLoaderAsyncResult = await SceneLoader.ImportMeshAsync(
+        '',
+        '/models/',
+        'cute_creature.glb',
+        this.scene
+      );
 
-    const armorMat = new PBRMaterial('mat_player_armor', this.scene);
-    armorMat.albedoColor = new Color3(0.05, 0.06, 0.08);
-    armorMat.metallic = 0.85;
-    armorMat.roughness = 0.25;
+      this.cuteCreatureLoaded = true;
 
-    const neonMat = new StandardMaterial('mat_player_neon', this.scene);
-    neonMat.emissiveColor = new Color3(0.0, 0.85, 1.0); // Cyber Cyan
+      const rootNode = result.meshes[0];
+      rootNode.name = 'player_cute_creature_root';
+      rootNode.parent = this.avatarRoot;
 
-    // --- Torso / Chest ---
-    const torsoNode = new TransformNode('player_torso_node', this.scene);
-    torsoNode.parent = parent;
-    torsoNode.position.y = 1.05;
+      // Ensure creature meshes are non-colliding, cast shadows, and clamp lights
+      for (const mesh of result.meshes) {
+        mesh.isPickable = false;
+        mesh.checkCollisions = false;
+        if (!mesh.name.startsWith('player_')) {
+          mesh.name = `player_${mesh.name}`;
+        }
+        if (mesh.material && 'maxSimultaneousLights' in mesh.material) {
+          // Restrict simultaneous lights to 4 to prevent WebGL uniform buffer limit errors
+          (mesh.material as { maxSimultaneousLights?: number }).maxSimultaneousLights = 4;
+        }
+        this.environment.addShadowCaster(mesh);
+        this.cuteCreatureMeshes.push(mesh);
+      }
 
-    const torsoMesh = MeshBuilder.CreateBox('player_torso', { width: 0.65, depth: 0.35, height: 0.65 }, this.scene);
-    torsoMesh.parent = torsoNode;
-    torsoMesh.material = suitMat;
-    environment.addShadowCaster(torsoMesh);
+      // Exclude distant street lamp lights from player meshes so vertex shader doesn't exceed UBO limit
+      for (const light of this.scene.lights) {
+        if (light.name.startsWith('lamp_light_')) {
+          for (const mesh of this.cuteCreatureMeshes) {
+            light.excludedMeshes.push(mesh);
+          }
+        }
+      }
 
-    // Glowing chest arc reactor
-    const arcReactor = MeshBuilder.CreateCylinder('player_arc', { height: 0.05, diameter: 0.16 }, this.scene);
-    arcReactor.rotation.x = Math.PI / 2;
-    arcReactor.position = new Vector3(0, 0.05, 0.18);
-    arcReactor.parent = torsoNode;
-    arcReactor.material = neonMat;
+      // Position creature so feet touch ground at bottom of physics capsule (local y = 0.0)
+      rootNode.position = new Vector3(0, 0, 0);
+      rootNode.rotation = new Vector3(0, 0, 0);
 
-    // Tactical Backpack
-    const backpack = MeshBuilder.CreateBox('player_backpack', { width: 0.45, depth: 0.2, height: 0.5 }, this.scene);
-    backpack.position = new Vector3(0, 0.05, -0.25);
-    backpack.parent = torsoNode;
-    backpack.material = armorMat;
+      // Connect animation clips (idle, walk, run, jump)
+      if (result.animationGroups && result.animationGroups.length > 0) {
+        this.animation.setAnimationGroups(result.animationGroups);
+      }
 
-    // --- Head & Visor ---
-    const headNode = new TransformNode('player_head_node', this.scene);
-    headNode.parent = torsoNode;
-    headNode.position.y = 0.55;
+      // If avatar is set to Android Boy, hide cute creature
+      if (this.avatarType === 'android_boy') {
+        this.setCuteCreatureVisible(false);
+      }
+    } catch (error) {
+      console.warn('[Player] Failed to load cute_creature.glb, falling back to Android Boy backup:', error);
+      this.switchToAndroidBoyBackup();
+    }
+  }
 
-    const headMesh = MeshBuilder.CreateSphere('player_head', { diameter: 0.38 }, this.scene);
-    headMesh.parent = headNode;
-    headMesh.material = armorMat;
+  /**
+   * =========================================================================
+   * Android Boy Backup System
+   * =========================================================================
+   * Allows activating or falling back to the original procedural Android Boy rig.
+   */
+  public switchToAndroidBoyBackup(): void {
+    this.avatarType = 'android_boy';
+    this.setCuteCreatureVisible(false);
 
-    // Glowing Visor
-    const visor = MeshBuilder.CreateBox('player_visor', { width: 0.3, depth: 0.12, height: 0.1 }, this.scene);
-    visor.position = new Vector3(0, 0.02, 0.16);
-    visor.parent = headNode;
-    visor.material = neonMat;
+    if (!this.androidBoyRoot) {
+      const rig = buildAndroidBoyRig(this.scene, this.avatarRoot, this.environment);
+      this.androidBoyRoot = rig.rootNode;
+      this.androidBoyLimbs = rig.limbs;
+      this.androidBoyMeshes = rig.meshes;
+    }
 
-    // --- Left Arm ---
-    const leftArmNode = new TransformNode('player_left_arm_node', this.scene);
-    leftArmNode.parent = torsoNode;
-    leftArmNode.position = new Vector3(-0.45, 0.22, 0);
+    if (this.androidBoyRoot) {
+      this.androidBoyRoot.setEnabled(true);
+    }
+    if (this.androidBoyLimbs) {
+      this.animation.setLimbNodes(this.androidBoyLimbs);
+    }
+  }
 
-    const leftArmMesh = MeshBuilder.CreateCylinder('player_l_arm', { height: 0.58, diameter: 0.15 }, this.scene);
-    leftArmMesh.position.y = -0.26;
-    leftArmMesh.parent = leftArmNode;
-    leftArmMesh.material = suitMat;
+  /**
+   * Switches active avatar back to Cute Creature.
+   */
+  public switchToCuteCreature(): void {
+    this.avatarType = 'cute_creature';
+    if (this.androidBoyRoot) {
+      this.androidBoyRoot.setEnabled(false);
+    }
+    this.setCuteCreatureVisible(true);
+    this.animation.reset();
+  }
 
-    // --- Right Arm ---
-    const rightArmNode = new TransformNode('player_right_arm_node', this.scene);
-    rightArmNode.parent = torsoNode;
-    rightArmNode.position = new Vector3(0.45, 0.22, 0);
+  /**
+   * Toggles avatar between Cute Creature and Android Boy.
+   */
+  public toggleAvatar(): AvatarType {
+    if (this.avatarType === 'cute_creature') {
+      this.switchToAndroidBoyBackup();
+    } else {
+      this.switchToCuteCreature();
+    }
+    return this.avatarType;
+  }
 
-    const rightArmMesh = MeshBuilder.CreateCylinder('player_r_arm', { height: 0.58, diameter: 0.15 }, this.scene);
-    rightArmMesh.position.y = -0.26;
-    rightArmMesh.parent = rightArmNode;
-    rightArmMesh.material = suitMat;
+  public getAvatarType(): AvatarType {
+    return this.avatarType;
+  }
 
-    // --- Left Leg ---
-    const leftLegNode = new TransformNode('player_left_leg_node', this.scene);
-    leftLegNode.parent = parent;
-    leftLegNode.position = new Vector3(-0.2, 0.65, 0);
-
-    const leftLegMesh = MeshBuilder.CreateCylinder('player_l_leg', { height: 0.65, diameter: 0.18 }, this.scene);
-    leftLegMesh.position.y = -0.32;
-    leftLegMesh.parent = leftLegNode;
-    leftLegMesh.material = armorMat;
-
-    // Boot
-    const leftBoot = MeshBuilder.CreateBox('player_l_boot', { width: 0.2, depth: 0.32, height: 0.14 }, this.scene);
-    leftBoot.position = new Vector3(0, -0.62, 0.05);
-    leftBoot.parent = leftLegNode;
-    leftBoot.material = suitMat;
-
-    // --- Right Leg ---
-    const rightLegNode = new TransformNode('player_right_leg_node', this.scene);
-    rightLegNode.parent = parent;
-    rightLegNode.position = new Vector3(0.2, 0.65, 0);
-
-    const rightLegMesh = MeshBuilder.CreateCylinder('player_r_leg', { height: 0.65, diameter: 0.18 }, this.scene);
-    rightLegMesh.position.y = -0.32;
-    rightLegMesh.parent = rightLegNode;
-    rightLegMesh.material = armorMat;
-
-    // Boot
-    const rightBoot = MeshBuilder.CreateBox('player_r_boot', { width: 0.2, depth: 0.32, height: 0.14 }, this.scene);
-    rightBoot.position = new Vector3(0, -0.62, 0.05);
-    rightBoot.parent = rightLegNode;
-    rightBoot.material = suitMat;
-
-    return {
-      torso: torsoNode,
-      head: headNode,
-      leftArm: leftArmNode,
-      rightArm: rightArmNode,
-      leftLeg: leftLegNode,
-      rightLeg: rightLegNode,
-    };
+  private setCuteCreatureVisible(visible: boolean): void {
+    for (const mesh of this.cuteCreatureMeshes) {
+      mesh.isVisible = visible;
+      mesh.setEnabled(visible);
+    }
   }
 
   public update(deltaTime: number): void {
@@ -272,6 +288,7 @@ export class Player {
   public dispose(): void {
     this.controller.dispose();
     this.camera.dispose();
+    this.animation.dispose();
     this.rootMesh.dispose(false, true);
   }
 }

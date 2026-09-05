@@ -39,5 +39,12 @@ export function createScene(engine: Engine, config: SceneConfig = {}): Scene {
   scene.autoClearDepthAndStencil = true;
   scene.blockMaterialDirtyMechanism = false;
 
+  // Globally enforce max 4 simultaneous lights per material to avoid GL_MAX_VERTEX_UNIFORM_BUFFERS limit
+  scene.onNewMaterialAddedObservable.add((mat) => {
+    if ('maxSimultaneousLights' in mat) {
+      (mat as { maxSimultaneousLights?: number }).maxSimultaneousLights = 4;
+    }
+  });
+
   return scene;
 }
