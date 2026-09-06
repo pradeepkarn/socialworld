@@ -1,4 +1,4 @@
-export type AnimationState = 'idle' | 'walk' | 'run' | 'jump';
+export type AnimationState = 'idle' | 'walk' | 'run' | 'jump' | 'handshake';
 
 export type TimeOfDay = 'day' | 'sunset' | 'night';
 

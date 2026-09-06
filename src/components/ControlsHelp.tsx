@@ -90,6 +90,12 @@ export const ControlsHelp: React.FC = () => {
             <span style={styles.desc}>Enter Shop / Action</span>
           </div>
 
+          {/* Handshake / Greet */}
+          <div style={styles.row}>
+            <span style={{ ...styles.key, color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.45)' }}>H</span>
+            <span style={styles.desc}>Handshake / Greet</span>
+          </div>
+
           {/* Escape / Close Modals */}
           <div style={styles.row}>
             <span style={styles.key}>ESC</span>

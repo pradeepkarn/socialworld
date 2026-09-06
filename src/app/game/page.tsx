@@ -20,7 +20,7 @@ const GameUI = dynamic(
 
 export default function GamePage() {
   return (
-    <main style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}>
+    <main style={{ width: '100vw', height: '100dvh', position: 'fixed', inset: 0, overflow: 'hidden' }}>
       <GameUI />
     </main>
   );
@@ -29,7 +29,7 @@ export default function GamePage() {
 const loadingStyles: Record<string, React.CSSProperties> = {
   container: {
     width: '100vw',
-    height: '100vh',
+    height: '100dvh',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',

@@ -1,0 +1,40 @@
+{
+  "types": [
+    {
+      "id": "scout",
+      "name": "Scout Harness",
+      "coverage": "chest_harness",
+      "platingThickness": 0.04
+    },
+    {
+      "id": "heavy",
+      "name": "Heavy Ballistic",
+      "coverage": "full_torso",
+      "platingThickness": 0.09
+    },
+    {
+      "id": "commando",
+      "name": "Asymmetrical Commando",
+      "coverage": "sash_shoulder",
+      "platingThickness": 0.06
+    },
+    {
+      "id": "hoodie",
+      "name": "Tech Hoodie Collar",
+      "coverage": "cowl_collar",
+      "platingThickness": 0.05
+    },
+    {
+      "id": "exosuit",
+      "name": "Exosuit Ribs",
+      "coverage": "ribcage_spine",
+      "platingThickness": 0.07
+    },
+    {
+      "id": "runner",
+      "name": "Chevron Runner Vest",
+      "coverage": "sport_vest",
+      "platingThickness": 0.05
+    }
+  ]
+}

@@ -5,66 +5,172 @@ import {
   Ray,
   AbstractMesh,
 } from '@babylonjs/core';
+import { ICameraConfig, defaultCameraConfig } from '../camera/CameraConfig';
 
 /**
  * =========================================================================
- * PlayerCamera - Third-Person Orbital Camera with Anti-Clip Occlusion
+ * PlayerCamera - Industry-Grade Third-Person Action Game Camera
  * =========================================================================
  * WHAT IT DOES:
- * - Manages the third-person camera following behind the player avatar.
- * - Mouse drag rotates the camera around the player (orbit).
- * - Mouse scroll wheel zooms in and out.
- *
- * KEY GAME DEV TECHNIQUES:
- * 1. ArcRotateCamera: Uses spherical coordinates:
- *    - alpha: Horizontal orbit angle (yaw).
- *    - beta: Vertical pitch angle (elevation).
- *    - radius: Distance from the player (default: 6.5m).
- * 2. Ground Pitch Clamp (`upperBetaLimit`):
- *    Prevents the camera from tilting beneath the street so the player
- *    never sees underneath the floor.
- * 3. Smooth Camera Trailing (`Vector3.Lerp`):
- *    Smoothly lags and glides behind the player to eliminate jarring motion sickness.
- * 4. Anti-Wall Clipping (Occlusion Raycast):
- *    Shoots a ray from character to camera. If a building wall gets in between,
- *    it automatically zooms the camera in closer so you never see inside walls!
+ * - Smoothly follows behind the player avatar with frame-rate independent damping.
+ * - Free 360° horizontal mouse orbit independent of character orientation.
+ * - Vertical pitch clamped between configurable limits (never flips upside down).
+ * - Desktop pointer-lock integration with seamless fallback to drag-orbit.
+ * - Jump/fall physics stability via dual-axis target damping (cushions vertical spikes).
+ * - Wall occlusion raycasting with smooth collision pull-in and spring recovery.
+ * - Pre-allocated reusable math vectors (0 GC allocations per frame in update loop).
  */
 export class PlayerCamera {
   public camera: ArcRotateCamera;
   private scene: Scene;
+  private canvas: HTMLCanvasElement;
+  private config: ICameraConfig;
+
   private targetMesh: AbstractMesh | null = null;
-  private targetOffset: Vector3 = new Vector3(0, 1.6, 0); // Focus at eye/chest level (1.6m high)
-  private desiredRadius: number = 6.5;
+  private smoothedTarget: Vector3 = new Vector3(0, 1.65, 0);
+  private desiredRadius: number;
+  private targetInitialized: boolean = false;
 
-  constructor(scene: Scene, canvas: HTMLCanvasElement) {
+  // Pointer Lock & Mouse Look state
+  private isPointerLocked: boolean = false;
+  private pointerLockEnabled: boolean = false;
+  private wheelListener?: (e: WheelEvent) => void;
+
+  // Pre-allocated reusable vectors for zero-allocation performance
+  private _ray: Ray;
+  private _forwardVec: Vector3 = new Vector3(0, 0, 1);
+  private _rightVec: Vector3 = new Vector3(1, 0, 0);
+
+  constructor(
+    scene: Scene,
+    canvas: HTMLCanvasElement,
+    customConfig?: Partial<ICameraConfig>
+  ) {
     this.scene = scene;
+    this.canvas = canvas;
+    this.config = { ...defaultCameraConfig, ...customConfig };
+    this.desiredRadius = this.config.defaultDistance;
 
-    // Create 3rd-person ArcRotateCamera
+    // 1. Create 3rd-person ArcRotateCamera with comfortable framing
     this.camera = new ArcRotateCamera(
       'player_camera',
-      -Math.PI / 2,     // Initial alpha (facing forward along Z)
-      Math.PI / 2.8,    // Initial beta (slight downward tilt over shoulder)
+      -Math.PI / 2,            // Initial alpha (facing forward along Z)
+      this.config.initialBeta, // Initial beta (~66° downward over-shoulder tilt)
       this.desiredRadius,
-      new Vector3(0, 1.6, 0),
+      new Vector3(0, this.config.heightOffset, 0),
       this.scene
     );
 
-    // Camera limits & smooth damping
-    this.camera.lowerRadiusLimit = 2.0;               // Closest zoom (2m)
-    this.camera.upperRadiusLimit = 15.0;              // Furthest zoom (15m)
-    this.camera.lowerBetaLimit = 0.15;                // Prevent looking straight down from top
-    this.camera.upperBetaLimit = Math.PI / 2 - 0.08;  // PREVENT CLIPPING: Stops before touching floor
-    this.camera.angularSensibilityX = 1400;           // Mouse horizontal sensitivity
-    this.camera.angularSensibilityY = 1400;           // Mouse vertical sensitivity
-    this.camera.wheelPrecision = 25;                  // Scroll wheel zoom speed
-    this.camera.inertia = 0.8;                        // Silky smooth rotational deceleration
+    // 2. Configure Limits and Dynamics
+    this.camera.lowerRadiusLimit = this.config.minDistance;
+    this.camera.upperRadiusLimit = this.config.maxDistance;
+    this.camera.lowerBetaLimit = this.config.lowerBetaLimit;
+    this.camera.upperBetaLimit = this.config.upperBetaLimit;
+    this.camera.angularSensibilityX = this.config.angularSensibilityX;
+    this.camera.angularSensibilityY = this.config.angularSensibilityY;
+    this.camera.inertia = this.config.inertia;
+    this.camera.panningSensibility = 0; // Lock panning so camera always orbits centered on the player
 
-    // Attach mouse controls to the HTML canvas
+    // 3. Attach standard controls (supports drag when not locked)
     this.camera.attachControl(canvas, true);
 
-    // Physical collision radius for the camera lens
-    this.camera.checkCollisions = true;
-    this.camera.collisionRadius = new Vector3(0.4, 0.4, 0.4);
+    // Remove Babylon's default mouse wheel input so our smooth zoom interpolator controls distance
+    this.camera.inputs.removeByType('ArcRotateCameraMouseWheelInput');
+
+    // Allow both left-click and right-click to drag orbit
+    const pointersInput = (this.camera.inputs?.attached as any)?.pointers;
+    if (pointersInput) {
+      pointersInput.buttons = [0, 1, 2];
+    }
+
+    // Attach custom mouse wheel zoom listener for desktop
+    const onCanvasWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const delta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 80);
+      this.zoom(delta * this.config.wheelSensitivity);
+    };
+    this.canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
+    this.wheelListener = onCanvasWheel;
+
+    // Use custom raycast collision avoidance (Babylon's built-in checkCollisions on ArcRotateCamera causes radius popping)
+    this.camera.checkCollisions = false;
+
+    // Preallocate ray for occlusion testing
+    this._ray = new Ray(Vector3.Zero(), Vector3.Forward(), this.desiredRadius);
+
+    // 4. Setup Pointer Lock Event Listeners (only if explicitly enabled in config)
+    this.pointerLockEnabled = this.config.enablePointerLock;
+    if (this.config.enablePointerLock) {
+      this.setupPointerLockListeners();
+    }
+  }
+
+  /**
+   * Configures desktop pointer lock for first-class mouse look.
+   */
+  private setupPointerLockListeners(): void {
+    const onCanvasClick = (): void => {
+      if (!this.pointerLockEnabled) return;
+      if (document.pointerLockElement !== this.canvas) {
+        try {
+          this.canvas.requestPointerLock();
+        } catch {
+          // Pointer lock rejected or not supported
+        }
+      }
+    };
+
+    const onPointerLockChange = (): void => {
+      this.isPointerLocked = document.pointerLockElement === this.canvas;
+    };
+
+    const onMouseMove = (e: MouseEvent): void => {
+      if (!this.isPointerLocked) return;
+
+      const movementX = e.movementX || 0;
+      const movementY = e.movementY || 0;
+
+      // Rotate camera yaw (alpha) and pitch (beta)
+      this.camera.alpha += movementX * this.config.mouseSensitivityX;
+      this.camera.beta += movementY * this.config.mouseSensitivityY;
+
+      // Clamp vertical pitch strictly within safe angles (never flips upside down)
+      this.camera.beta = Math.max(
+        this.config.lowerBetaLimit,
+        Math.min(this.config.upperBetaLimit, this.camera.beta)
+      );
+    };
+
+    this.canvas.addEventListener('click', onCanvasClick);
+    document.addEventListener('pointerlockchange', onPointerLockChange);
+    document.addEventListener('mousemove', onMouseMove);
+
+    this.cleanupListeners = () => {
+      this.canvas.removeEventListener('click', onCanvasClick);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
+      document.removeEventListener('mousemove', onMouseMove);
+    };
+  }
+
+  private cleanupListeners?: () => void;
+
+  /**
+   * Releases pointer lock (e.g. when opening shop modals or settings menu).
+   */
+  public releasePointerLock(): void {
+    if (document.pointerLockElement === this.canvas) {
+      document.exitPointerLock();
+    }
+  }
+
+  /**
+   * Enables or disables pointer lock requests.
+   */
+  public setPointerLockEnabled(enabled: boolean): void {
+    this.pointerLockEnabled = enabled;
+    if (!enabled) {
+      this.releasePointerLock();
+    }
   }
 
   /**
@@ -72,56 +178,162 @@ export class PlayerCamera {
    */
   public setTarget(mesh: AbstractMesh): void {
     this.targetMesh = mesh;
+    this.targetInitialized = false;
+  }
+
+  /**
+   * Snaps the smoothed follow target immediately to the target mesh.
+   * Useful on teleportation or respawns to avoid camera flying across the city.
+   */
+  public snapTarget(): void {
+    if (!this.targetMesh) return;
+    this.smoothedTarget.set(
+      this.targetMesh.position.x,
+      this.targetMesh.position.y + this.config.heightOffset,
+      this.targetMesh.position.z
+    );
+    this.camera.target.copyFrom(this.smoothedTarget);
+    this.targetInitialized = true;
+  }
+
+  /**
+   * Sets the user's desired camera distance, clamped to config limits.
+   */
+  public setDesiredRadius(radius: number): void {
+    this.desiredRadius = Math.max(
+      this.config.minDistance,
+      Math.min(this.config.maxDistance, radius)
+    );
+    this.camera.radius = this.desiredRadius;
+  }
+
+  public getDesiredRadius(): number {
+    return this.desiredRadius;
+  }
+
+  /**
+   * Adjusts the desired camera radius smoothly (used by desktop mouse wheel & mobile pinch-to-zoom).
+   */
+  public zoom(delta: number): void {
+    this.desiredRadius = Math.max(
+      this.config.minDistance,
+      Math.min(this.config.maxDistance, this.desiredRadius + delta)
+    );
+  }
+
+  /**
+   * Returns current actual camera radius.
+   */
+  public getRadius(): number {
+    return this.camera.radius;
   }
 
   /**
    * =========================================================================
-   * update() - Smooth Tracking & Wall Collision Raycast
+   * update() - Frame-Rate-Independent Follow & Wall Collision Raycast
    * =========================================================================
-   * Called every frame to glide the camera and avoid clipping inside walls.
+   * Called every frame with deltaTime to glide the camera smoothly and avoid clipping inside walls.
    */
-  public update(): void {
+  public update(deltaTime: number = 0.016): void {
     if (!this.targetMesh) return;
 
-    // Desired eye-level focal point
-    const targetPos = this.targetMesh.position.add(this.targetOffset);
+    // Clamp deltaTime to avoid extreme warping on tab switch or pause
+    const dt = Math.min(deltaTime, 0.1);
 
-    // 1. Smooth Camera Target Lerp (Linear Interpolation)
-    // 0.15 factor gives smooth trailing momentum without laggy sluggishness
-    this.camera.target = Vector3.Lerp(this.camera.target, targetPos, 0.15);
+    // Target focal point at player chest/eyes
+    const desiredX = this.targetMesh.position.x;
+    const desiredY = this.targetMesh.position.y + this.config.heightOffset;
+    const desiredZ = this.targetMesh.position.z;
 
-    // 2. Wall Occlusion Raycast with Smooth Zoom-Out Recovery
-    // Shoot an invisible ray from the player toward the camera position
-    const rayDir = this.camera.position.subtract(this.camera.target).normalize();
-    const ray = new Ray(this.camera.target, rayDir, this.desiredRadius);
-    const hit = this.scene.pickWithRay(ray, (mesh) => {
-      return mesh.checkCollisions && mesh !== this.targetMesh && !mesh.name.startsWith('player_');
+    // Instant snap on first frame to prevent camera flying in from world origin
+    if (!this.targetInitialized) {
+      this.smoothedTarget.set(desiredX, desiredY, desiredZ);
+      this.camera.target.copyFrom(this.smoothedTarget);
+      this.targetInitialized = true;
+      return;
+    }
+
+    // 1. Frame-rate independent dual-axis follow damping
+    // Horizontal (XZ) follows firmly with movement; Vertical (Y) cushions jumps and stairs
+    const hFactor = 1.0 - Math.exp(-this.config.horizontalFollowSpeed * dt);
+    const vFactor = 1.0 - Math.exp(-this.config.verticalFollowSpeed * dt);
+
+    this.smoothedTarget.x += (desiredX - this.smoothedTarget.x) * hFactor;
+    this.smoothedTarget.y += (desiredY - this.smoothedTarget.y) * vFactor;
+    this.smoothedTarget.z += (desiredZ - this.smoothedTarget.z) * hFactor;
+
+    this.camera.target.copyFrom(this.smoothedTarget);
+
+    // Enforce pitch clamping every frame to guarantee limits under momentum or drag
+    if (this.camera.beta < this.config.lowerBetaLimit) {
+      this.camera.beta = this.config.lowerBetaLimit;
+    } else if (this.camera.beta > this.config.upperBetaLimit) {
+      this.camera.beta = this.config.upperBetaLimit;
+    }
+
+    // 2. Wall Occlusion Collision Raycast
+    // Shoot ray from smoothed player focal point towards camera position
+    // Analytically calculate exact unit direction from target to camera
+    const sinB = Math.sin(this.camera.beta);
+    const cosB = Math.cos(this.camera.beta);
+    const dirX = Math.cos(this.camera.alpha) * sinB;
+    const dirY = cosB;
+    const dirZ = Math.sin(this.camera.alpha) * sinB;
+
+    this._ray.origin.copyFrom(this.smoothedTarget);
+    this._ray.direction.set(dirX, dirY, dirZ);
+    this._ray.length = this.desiredRadius;
+
+    const hit = this.scene.pickWithRay(this._ray, (mesh) => {
+      return (
+        mesh.checkCollisions &&
+        mesh !== this.targetMesh &&
+        !mesh.name.startsWith('player_') &&
+        !mesh.name.startsWith('ws_label') &&
+        !mesh.name.startsWith('torso_') &&
+        !mesh.name.startsWith('l_') &&
+        !mesh.name.startsWith('r_') &&
+        !mesh.name.startsWith('head_') &&
+        !mesh.name.startsWith('ground') &&
+        !mesh.name.startsWith('road') &&
+        !mesh.name.startsWith('sw_') &&
+        !mesh.name.startsWith('nsRoad') &&
+        !mesh.name.startsWith('ewRoad') &&
+        !mesh.name.startsWith('plaza')
+      );
     });
+    // 2. Wall Occlusion Collision Raycast & Smooth Zoom Interpolation
+    let effectiveTargetDistance = this.desiredRadius;
 
-    // If a wall is blocking line of sight, pull camera forward in front of the wall!
-    if (hit && hit.hit && hit.distance > 1.2 && hit.distance < this.desiredRadius) {
-      this.camera.radius = Math.max(2.0, hit.distance - 0.4);
-    } else {
-      // Line of sight is clear: if user scrolled, update desiredRadius; otherwise smoothly restore
-      if (this.camera.radius < this.desiredRadius) {
-        this.camera.radius += (this.desiredRadius - this.camera.radius) * 0.08;
-      } else {
-        this.desiredRadius = this.camera.radius;
-      }
+    if (hit && hit.hit && hit.distance < this.desiredRadius) {
+      effectiveTargetDistance = Math.max(this.config.minDistance, hit.distance - this.config.collisionRadius);
+    }
+
+    if (effectiveTargetDistance < this.camera.radius) {
+      // Pulling in (obstacle collision or zooming in): snappy response
+      const factor = 1.0 - Math.exp(-this.config.collisionZoomSpeed * dt);
+      this.camera.radius += (effectiveTargetDistance - this.camera.radius) * factor;
+    } else if (effectiveTargetDistance > this.camera.radius + 0.001) {
+      // Extending out (cleared obstacle or zooming out): smooth spring recovery
+      const factor = 1.0 - Math.exp(-this.config.zoomSmoothness * dt);
+      this.camera.radius += (effectiveTargetDistance - this.camera.radius) * factor;
     }
   }
+
 
   /**
    * =========================================================================
    * getForwardVector() - Horizontal Forward Direction
    * =========================================================================
-   * Extracts the horizontal heading direction of the camera (flattened on XZ).
-   * Used by PlayerController so pressing 'W' runs toward where the camera looks.
+   * Extracts horizontal heading of camera (flattened on XZ plane, Y=0, unit length).
+   * Used by PlayerController so pressing 'W' runs toward where camera looks.
+   * Analytical zero-allocation implementation directly derived from camera yaw (alpha).
    */
   public getForwardVector(): Vector3 {
-    const forward = this.camera.getForwardRay().direction;
-    forward.y = 0; // Strip vertical pitch
-    return forward.normalize();
+    const cosA = Math.cos(this.camera.alpha);
+    const sinA = Math.sin(this.camera.alpha);
+    this._forwardVec.set(-cosA, 0, -sinA);
+    return this._forwardVec;
   }
 
   /**
@@ -130,17 +342,82 @@ export class PlayerCamera {
    * =========================================================================
    * Computes the 90-degree rightward vector perpendicular to forward.
    * Used by PlayerController so pressing 'D' strafes right.
+   * Zero-allocation implementation.
    */
   public getRightVector(): Vector3 {
-    const forward = this.getForwardVector();
-    return new Vector3(forward.z, 0, -forward.x).normalize();
+    const f = this.getForwardVector();
+    this._rightVec.set(f.z, 0, -f.x);
+    return this._rightVec;
+  }
+
+  /**
+   * Sets and clamps the vertical pitch angle directly.
+   */
+  public setPitch(beta: number): void {
+    this.camera.beta = Math.max(
+      this.config.lowerBetaLimit,
+      Math.min(this.config.upperBetaLimit, beta)
+    );
+  }
+
+  /**
+   * Sets sensitivity multiplier (e.g. 0.7x, 1.0x, 1.4x, 1.8x) for touch/mouse look.
+   */
+  public setSensitivityMultiplier(mult: number): void {
+    this.config.sensitivityMultiplier = Math.max(0.2, Math.min(3.0, mult));
+  }
+
+  public getSensitivityMultiplier(): number {
+    return this.config.sensitivityMultiplier || 1.0;
+  }
+
+  /**
+   * Directly adjusts desired camera distance (e.g. from distance slider).
+   */
+  public setDistance(distance: number): void {
+    this.setDesiredRadius(distance);
+  }
+
+  /**
+   * Rotates camera yaw and pitch with limits and sensitivity multiplier enforced.
+   */
+  public rotate(deltaYaw: number, deltaPitch: number): void {
+    const mult = this.config.sensitivityMultiplier || 1.0;
+    this.camera.alpha += deltaYaw * mult;
+    this.setPitch(this.camera.beta + deltaPitch * mult);
+  }
+
+  /**
+   * Returns camera configuration.
+   */
+  public getConfig(): ICameraConfig {
+    return this.config;
+  }
+
+  /**
+   * Updates camera configuration dynamically.
+   */
+  public updateConfig(newConfig: Partial<ICameraConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+    this.camera.lowerBetaLimit = this.config.lowerBetaLimit;
+    this.camera.upperBetaLimit = this.config.upperBetaLimit;
+    this.camera.lowerRadiusLimit = this.config.minDistance;
+    this.camera.upperRadiusLimit = this.config.maxDistance;
   }
 
   /**
    * Detaches mouse controls and cleans up camera memory.
    */
   public dispose(): void {
+    this.releasePointerLock();
+    if (this.cleanupListeners) {
+      this.cleanupListeners();
+    }
+    if (this.wheelListener) {
+      this.canvas.removeEventListener('wheel', this.wheelListener);
+    }
     this.camera.detachControl();
     this.camera.dispose();
   }
+
 }

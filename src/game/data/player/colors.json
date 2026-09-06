@@ -1,0 +1,70 @@
+{
+  "skinTones": [
+    { "id": "porcelain", "name": "Warm Porcelain", "hex": "#f8d9c5" },
+    { "id": "sand", "name": "Fair Sand", "hex": "#eec5a8" },
+    { "id": "almond", "name": "Warm Almond", "hex": "#d8a47f" },
+    { "id": "honey", "name": "Golden Honey Tan", "hex": "#c68656" },
+    { "id": "bronze", "name": "Chestnut Bronze", "hex": "#9b623c" },
+    { "id": "mahogany", "name": "Deep Mahogany", "hex": "#704225" },
+    { "id": "umber", "name": "Dark Umber", "hex": "#4a2c17" },
+    { "id": "espresso", "name": "Deep Espresso", "hex": "#351f12" }
+  ],
+  "hairColors": [
+    { "id": "black", "name": "Jet Black", "hex": "#171717" },
+    { "id": "chocolate", "name": "Dark Chocolate", "hex": "#3b2314" },
+    { "id": "chestnut", "name": "Warm Chestnut", "hex": "#6b4423" },
+    { "id": "blonde", "name": "Dirty Blonde", "hex": "#c29b68" },
+    { "id": "silver", "name": "Platinum Silver", "hex": "#d4d4d8" },
+    { "id": "rust", "name": "Copper Rust", "hex": "#7c2d12" },
+    { "id": "blue", "name": "Electric Blue", "hex": "#0284c7" },
+    { "id": "violet", "name": "Neon Violet", "hex": "#a21caf" }
+  ],
+  "topColors": [
+    { "id": "slate", "name": "Midnight Slate", "hex": "#1e293b" },
+    { "id": "teal", "name": "Cyber Teal", "hex": "#0f766e" },
+    { "id": "crimson", "name": "Crimson Red", "hex": "#991b1b" },
+    { "id": "cobalt", "name": "Cobalt Blue", "hex": "#1d4ed8" },
+    { "id": "ochre", "name": "Amber Ochre", "hex": "#b45309" },
+    { "id": "charcoal", "name": "Charcoal Grey", "hex": "#475569" },
+    { "id": "purple", "name": "Royal Purple", "hex": "#581c87" },
+    { "id": "pine", "name": "Forest Pine", "hex": "#065f46" },
+    { "id": "steel", "name": "Steel Navy", "hex": "#334155" },
+    { "id": "plum", "name": "Plum Rose", "hex": "#831843" }
+  ],
+  "pantsColors": [
+    { "id": "pitch", "name": "Pitch Black", "hex": "#090d16" },
+    { "id": "dark_slate", "name": "Dark Slate", "hex": "#1e293b" },
+    { "id": "charcoal_pants", "name": "Charcoal", "hex": "#334155" },
+    { "id": "obsidian", "name": "Obsidian Brown", "hex": "#1c1917" },
+    { "id": "denim", "name": "Deep Denim", "hex": "#1e3a8a" },
+    { "id": "olive", "name": "Military Olive", "hex": "#14532d" },
+    { "id": "indigo", "name": "Dark Indigo", "hex": "#312e81" },
+    { "id": "carbon", "name": "Carbon Grey", "hex": "#262626" }
+  ],
+  "shoeColors": [
+    { "id": "stealth_black", "name": "Stealth Black", "hex": "#0f172a" },
+    { "id": "cyan_runner", "name": "Cyan Runner", "hex": "#38bdf8" },
+    { "id": "gold_accent", "name": "Gold Accent", "hex": "#f59e0b" },
+    { "id": "platinum_white", "name": "Platinum White", "hex": "#e2e8f0" },
+    { "id": "crimson_shoe", "name": "Crimson High-Top", "hex": "#dc2626" },
+    { "id": "emerald_shoe", "name": "Emerald Accent", "hex": "#10b981" }
+  ],
+  "armorColors": [
+    { "id": "armor_slate", "name": "Armor Slate", "hex": "#0f172a" },
+    { "id": "armor_zinc", "name": "Armor Zinc", "hex": "#18181b" },
+    { "id": "armor_forest", "name": "Armor Forest", "hex": "#062016" },
+    { "id": "armor_indigo", "name": "Armor Indigo", "hex": "#1e1b4b" },
+    { "id": "armor_stone", "name": "Armor Stone", "hex": "#1c1917" },
+    { "id": "armor_emerald", "name": "Armor Emerald", "hex": "#022c22" }
+  ],
+  "accentColors": [
+    { "id": "neon_cyan", "name": "Neon Cyan", "hex": "#00e5ff" },
+    { "id": "hot_magenta", "name": "Hot Magenta", "hex": "#ff2a85" },
+    { "id": "mint_glow", "name": "Mint Glow", "hex": "#34d399" },
+    { "id": "electric_gold", "name": "Electric Gold", "hex": "#fbbf24" },
+    { "id": "neon_purple", "name": "Neon Purple", "hex": "#a855f7" },
+    { "id": "neon_coral", "name": "Neon Coral", "hex": "#f87171" },
+    { "id": "sky_blue", "name": "Sky Blue", "hex": "#38bdf8" },
+    { "id": "emerald_glow", "name": "Emerald Glow", "hex": "#22c55e" }
+  ]
+}

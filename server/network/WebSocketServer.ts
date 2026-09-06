@@ -15,7 +15,7 @@ export class NeonWebSocketServer {
 
   constructor(port: number, room: GameRoom) {
     this.room = room;
-    this.wss = new WSServer({ port });
+    this.wss = new WSServer({ port, host: '0.0.0.0' });
 
     this.wss.on('connection', (ws: WebSocket, req) => {
       const ip = req.socket.remoteAddress || 'unknown';
@@ -72,6 +72,20 @@ export class NeonWebSocketServer {
                 },
               };
               this.room.send(ws, pongMsg);
+              break;
+            }
+
+            case 'handshake_request': {
+              if (currentId && msg.payload?.targetId) {
+                this.room.handleHandshakeRequest(currentId, msg.payload.targetId);
+              }
+              break;
+            }
+
+            case 'handshake_accept': {
+              if (currentId && msg.payload?.requesterId) {
+                this.room.handleHandshakeAccept(currentId, msg.payload.requesterId);
+              }
               break;
             }
 

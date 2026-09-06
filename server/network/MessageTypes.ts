@@ -4,7 +4,7 @@
  * =========================================================================
  */
 
-export type AnimationState = 'idle' | 'walk' | 'run' | 'jump';
+export type AnimationState = 'idle' | 'walk' | 'run' | 'jump' | 'handshake';
 
 export interface IVector3 {
   x: number;
@@ -51,10 +51,26 @@ export interface IClientPingMessage {
   };
 }
 
+export interface IClientHandshakeRequestMessage {
+  type: 'handshake_request';
+  payload: {
+    targetId: string;
+  };
+}
+
+export interface IClientHandshakeAcceptMessage {
+  type: 'handshake_accept';
+  payload: {
+    requesterId: string;
+  };
+}
+
 export type ClientMessage =
   | IClientJoinMessage
   | IClientPlayerUpdateMessage
-  | IClientPingMessage;
+  | IClientPingMessage
+  | IClientHandshakeRequestMessage
+  | IClientHandshakeAcceptMessage;
 
 // -------------------------------------------------------------------------
 // Server-to-Client Packets
@@ -100,9 +116,38 @@ export interface IServerPongMessage {
   };
 }
 
+export interface IServerHandshakePromptMessage {
+  type: 'handshake_prompt';
+  payload: {
+    fromId: string;
+    fromName: string;
+  };
+}
+
+export interface IServerHandshakeStartMessage {
+  type: 'handshake_start';
+  payload: {
+    player1Id: string;
+    player2Id: string;
+    durationMs: number;
+  };
+}
+
+export interface IServerHandshakeCompleteMessage {
+  type: 'handshake_complete';
+  payload: {
+    player1Id: string;
+    player2Id: string;
+    rewardCredits: number;
+  };
+}
+
 export type ServerMessage =
   | IServerWelcomeMessage
   | IServerPlayerJoinedMessage
   | IServerPlayerLeftMessage
   | IServerPlayerUpdatesMessage
-  | IServerPongMessage;
+  | IServerPongMessage
+  | IServerHandshakePromptMessage
+  | IServerHandshakeStartMessage
+  | IServerHandshakeCompleteMessage;

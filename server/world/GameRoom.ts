@@ -109,6 +109,98 @@ export class GameRoom {
   }
 
   /**
+   * Handles Player A requesting a handshake with Player B.
+   */
+  public handleHandshakeRequest(fromId: string, targetId: string): void {
+    const fromPlayer = this.players.get(fromId);
+    const targetPlayer = this.players.get(targetId);
+    const targetWs = this.sockets.get(targetId);
+
+    if (!fromPlayer || !targetPlayer || !targetWs) {
+      return;
+    }
+
+    // Proximity check on server (within 4.5 meters)
+    const dx = fromPlayer.position.x - targetPlayer.position.x;
+    const dy = fromPlayer.position.y - targetPlayer.position.y;
+    const dz = fromPlayer.position.z - targetPlayer.position.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist > 4.5) {
+      console.log(`[GameRoom] Handshake rejected: distance too far (${dist.toFixed(2)}m)`);
+      return;
+    }
+
+    console.log(`[GameRoom] Handshake request: ${fromPlayer.name} -> ${targetPlayer.name}`);
+    const promptMsg: ServerMessage = {
+      type: 'handshake_prompt',
+      payload: {
+        fromId: fromPlayer.id,
+        fromName: fromPlayer.name,
+      },
+    };
+    this.send(targetWs, promptMsg);
+  }
+
+  /**
+   * Handles Player B accepting the handshake from Player A.
+   */
+  public handleHandshakeAccept(acceptorId: string, requesterId: string): void {
+    const acceptor = this.players.get(acceptorId);
+    const requester = this.players.get(requesterId);
+
+    if (!acceptor || !requester) {
+      return;
+    }
+
+    // Verify distance
+    const dx = acceptor.position.x - requester.position.x;
+    const dy = acceptor.position.y - requester.position.y;
+    const dz = acceptor.position.z - requester.position.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist > 5.0) {
+      console.log(`[GameRoom] Handshake accept rejected: distance too far (${dist.toFixed(2)}m)`);
+      return;
+    }
+
+    console.log(`[GameRoom] Handshake accepted: ${acceptor.name} <-> ${requester.name}`);
+
+    // Update their animation states in the room
+    acceptor.animationState = 'handshake';
+    requester.animationState = 'handshake';
+
+    // Broadcast handshake_start to both players and all observers in room
+    const startMsg: ServerMessage = {
+      type: 'handshake_start',
+      payload: {
+        player1Id: requester.id,
+        player2Id: acceptor.id,
+        durationMs: 2000,
+      },
+    };
+    this.broadcast(startMsg);
+
+    // Schedule completion and social reward (+10 Credits)
+    setTimeout(() => {
+      if (this.players.has(requester.id)) {
+        this.players.get(requester.id)!.animationState = 'idle';
+      }
+      if (this.players.has(acceptor.id)) {
+        this.players.get(acceptor.id)!.animationState = 'idle';
+      }
+
+      const completeMsg: ServerMessage = {
+        type: 'handshake_complete',
+        payload: {
+          player1Id: requester.id,
+          player2Id: acceptor.id,
+          rewardCredits: 10,
+        },
+      };
+      this.broadcast(completeMsg);
+    }, 2000);
+  }
+
+  /**
    * Starts the 20 Hz authoritative broadcast loop.
    */
   private startTickLoop(): void {

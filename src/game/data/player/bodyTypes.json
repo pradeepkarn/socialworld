@@ -1,0 +1,136 @@
+{
+  "types": [
+    {
+      "id": "slim",
+      "name": "Slim",
+      "torsoShape": "box",
+      "width": 0.88,
+      "height": 1.0,
+      "depth": 0.88,
+      "shoulder": 0.86,
+      "arm": 0.98,
+      "leg": 1.02
+    },
+    {
+      "id": "normal",
+      "name": "Normal",
+      "torsoShape": "box",
+      "width": 1.0,
+      "height": 1.0,
+      "depth": 1.0,
+      "shoulder": 1.0,
+      "arm": 1.0,
+      "leg": 1.0
+    },
+    {
+      "id": "broad",
+      "name": "Broad",
+      "torsoShape": "box",
+      "width": 1.14,
+      "height": 1.02,
+      "depth": 1.1,
+      "shoulder": 1.20,
+      "arm": 1.04,
+      "leg": 0.98
+    },
+    {
+      "id": "tall",
+      "name": "Tall",
+      "torsoShape": "capsule",
+      "width": 0.92,
+      "height": 1.12,
+      "depth": 0.92,
+      "shoulder": 0.96,
+      "arm": 1.12,
+      "leg": 1.14
+    },
+    {
+      "id": "short",
+      "name": "Short",
+      "torsoShape": "sphere",
+      "width": 1.04,
+      "height": 0.88,
+      "depth": 1.04,
+      "shoulder": 0.94,
+      "arm": 0.90,
+      "leg": 0.88
+    },
+    {
+      "id": "athletic",
+      "name": "Athletic",
+      "torsoShape": "wedge",
+      "width": 1.06,
+      "height": 1.05,
+      "depth": 0.96,
+      "shoulder": 1.16,
+      "arm": 1.06,
+      "leg": 1.06
+    },
+    {
+      "id": "stocky",
+      "name": "Stocky",
+      "torsoShape": "box",
+      "width": 1.18,
+      "height": 0.96,
+      "depth": 1.16,
+      "shoulder": 1.12,
+      "arm": 0.96,
+      "leg": 0.94
+    },
+    {
+      "id": "narrow",
+      "name": "Narrow",
+      "torsoShape": "cylinder",
+      "width": 0.86,
+      "height": 0.98,
+      "depth": 0.86,
+      "shoulder": 0.84,
+      "arm": 0.96,
+      "leg": 1.0
+    },
+    {
+      "id": "cylinder_android",
+      "name": "Cylindrical Android",
+      "torsoShape": "cylinder",
+      "width": 0.96,
+      "height": 1.04,
+      "depth": 0.96,
+      "shoulder": 1.02,
+      "arm": 1.02,
+      "leg": 1.02
+    },
+    {
+      "id": "sphere_mech",
+      "name": "Spherical Mech",
+      "torsoShape": "sphere",
+      "width": 1.16,
+      "height": 0.98,
+      "depth": 1.14,
+      "shoulder": 1.18,
+      "arm": 1.04,
+      "leg": 0.96
+    },
+    {
+      "id": "aero_capsule",
+      "name": "Aero Capsule",
+      "torsoShape": "capsule",
+      "width": 0.92,
+      "height": 1.08,
+      "depth": 0.92,
+      "shoulder": 0.96,
+      "arm": 1.04,
+      "leg": 1.08
+    },
+    {
+      "id": "hex_carapace",
+      "name": "Hex Carapace",
+      "torsoShape": "hexagonal",
+      "width": 1.10,
+      "height": 1.02,
+      "depth": 1.02,
+      "shoulder": 1.14,
+      "arm": 1.02,
+      "leg": 1.0
+    }
+  ]
+}

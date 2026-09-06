@@ -10,12 +10,14 @@ import { AnimationState } from '@/types/game';
  * WHAT IT DOES:
  * - Listens to keyboard keys (WASD, Arrows, Shift, Space, E).
  * - Implements industry-standard 3rd-person character mechanics:
- *   1. Camera-Relative Movement: Pressing 'W' runs toward where your camera looks.
- *   2. Smooth Turning: Turns the character's body smoothly toward the movement direction.
- *   3. Ground Raycasting: Casts an invisible laser down to detect if feet touch the ground.
- *   4. Realistic Gravity & Jumping: Accelerates downward in air; jumps on Space.
- *   5. Collision Sliding: Slides smoothly along building walls using `moveWithCollisions`.
- *   6. Animation Switching: Automatically toggles idle, walk, run, and jump poses.
+ *   1. Camera-Relative Movement: Pressing 'W' runs toward where camera looks horizontally.
+ *   2. Normalized Diagonal Speed: W+D runs at the same speed as W alone.
+ *   3. Independent Camera Orbit: Camera orbits freely 360° when stationary without turning body.
+ *   4. Smooth Body Turning: Frame-rate-independent exponential slerp toward move heading.
+ *   5. Ground Raycasting: Reusable downward ray detector.
+ *   6. Realistic Gravity & Jumping: Responsive jump on Space, downward stick on ground.
+ *   7. Collision Sliding: Slides smoothly along building walls using `moveWithCollisions`.
+ *   8. Zero GC Allocations: Pre-allocated scratch vectors and rays in update loop.
  */
 export class PlayerController {
   private scene: Scene;
@@ -45,6 +47,16 @@ export class PlayerController {
   // Interaction key callback (fires when 'E' is pressed)
   public onInteractPressed?: () => void;
 
+  // Handshake key callback (fires when 'H' is pressed)
+  public onHandshakePressed?: () => void;
+
+  // Preallocated scratch vectors and rays to eliminate per-frame garbage collection
+  private _moveDir: Vector3 = Vector3.Zero();
+  private _displacement: Vector3 = Vector3.Zero();
+  private _groundRay: Ray;
+  private _stepRay: Ray;
+  private _highRay: Ray;
+
   constructor(
     scene: Scene,
     rootMesh: AbstractMesh,
@@ -55,6 +67,11 @@ export class PlayerController {
     this.rootMesh = rootMesh;
     this.camera = camera;
     this.animation = animation;
+
+    // Initialize reusable rays
+    this._groundRay = new Ray(Vector3.Zero(), new Vector3(0, -1, 0), 0.65);
+    this._stepRay = new Ray(Vector3.Zero(), Vector3.Forward(), 0.65);
+    this._highRay = new Ray(Vector3.Zero(), Vector3.Forward(), 0.70);
 
     this.setupInputListeners();
   }
@@ -77,6 +94,13 @@ export class PlayerController {
         this.onInteractPressed();
       }
     }
+
+    // 'H' key for handshaking with nearby players
+    if (code === 'keyh' && !this.isLocked) {
+      if (this.onHandshakePressed) {
+        this.onHandshakePressed();
+      }
+    }
   };
 
   private handleKeyUp = (e: KeyboardEvent): void => {
@@ -85,13 +109,30 @@ export class PlayerController {
   };
 
   /**
-   * Locks or unlocks character movement (e.g. when reading shop catalog).
+   * Locks or unlocks character movement (e.g. when reading shop catalog or handshaking).
+   * Releases pointer lock so player can use cursor in UI modals.
    */
-  public setLocked(locked: boolean): void {
+  // Virtual joystick & mobile touch input states
+  private joystickForward: number = 0;
+  private joystickRight: number = 0;
+  private joystickSprinting: boolean = false;
+  private jumpRequested: boolean = false;
+
+  public setLocked(locked: boolean, keepAnimState: boolean = false): void {
     this.isLocked = locked;
     if (locked) {
-      this.keys = {}; // Clear any stuck keys
-      this.animation.setState('idle');
+      this.keys = {}; // Clear any held keys
+      this.joystickForward = 0;
+      this.joystickRight = 0;
+      this.joystickSprinting = false;
+      this.jumpRequested = false;
+      if (!keepAnimState && this.animation.getState() !== 'handshake') {
+        this.animation.setState('idle');
+      }
+      this.camera.releasePointerLock();
+      this.camera.setPointerLockEnabled(false);
+    } else {
+      this.camera.setPointerLockEnabled(true);
     }
   }
 
@@ -99,11 +140,51 @@ export class PlayerController {
     return this.isLocked;
   }
 
+  public setKey(code: string, pressed: boolean): void {
+    this.keys[code.toLowerCase()] = pressed;
+  }
+
+  /**
+   * Sets virtual joystick directional vector [-1, 1] from mobile touch interface.
+   * Feeds directly into character movement physics without duplicating movement code.
+   */
+  public setVirtualJoystick(forward: number, right: number, isSprinting: boolean = false): void {
+    this.joystickForward = Math.max(-1, Math.min(1, forward));
+    this.joystickRight = Math.max(-1, Math.min(1, right));
+    this.joystickSprinting = isSprinting;
+  }
+
+  /**
+   * Triggers a jump impulse from mobile touch button or external trigger.
+   */
+  public triggerJump(): void {
+    if (!this.isLocked) {
+      this.jumpRequested = true;
+    }
+  }
+
+  /**
+   * Triggers an interaction event (shop / dialogue) identical to pressing 'E'.
+   */
+  public triggerInteract(): void {
+    if (!this.isLocked && this.onInteractPressed) {
+      this.onInteractPressed();
+    }
+  }
+
+  /**
+   * Triggers a handshake request/accept identical to pressing 'H'.
+   */
+  public triggerHandshake(): void {
+    if (!this.isLocked && this.onHandshakePressed) {
+      this.onHandshakePressed();
+    }
+  }
+
   /**
    * =========================================================================
    * update() - Physics Loop (Called Every Frame at 60 FPS)
    * =========================================================================
-   * Executes the 9-step character movement pipeline:
    */
   public update(deltaTime: number): void {
     if (this.isLocked) {
@@ -111,104 +192,132 @@ export class PlayerController {
       return;
     }
 
-    // Step 1: Read directional keys
-    let inputForward = 0;
-    let inputRight = 0;
+    const dt = Math.min(deltaTime, 0.1);
+
+    // Step 1: Read directional inputs (Keyboard WASD + Virtual Joystick merged)
+    let inputForward = this.joystickForward;
+    let inputRight = this.joystickRight;
 
     if (this.keys['keyw'] || this.keys['arrowup']) inputForward += 1;
     if (this.keys['keys'] || this.keys['arrowdown']) inputForward -= 1;
     if (this.keys['keyd'] || this.keys['arrowright']) inputRight += 1;
     if (this.keys['keya'] || this.keys['arrowleft']) inputRight -= 1;
 
-    this.isSprinting = !!(this.keys['shiftleft'] || this.keys['shiftright']);
-    const isJumpPressed = !!this.keys['space'];
+    // Clamp combined inputs to unit range
+    inputForward = Math.max(-1, Math.min(1, inputForward));
+    inputRight = Math.max(-1, Math.min(1, inputRight));
 
-    // Step 2: Calculate Camera-Relative Movement
-    // "Forward" means wherever the camera is currently looking!
+    this.isSprinting = !!(this.keys['shiftleft'] || this.keys['shiftright']) || this.joystickSprinting;
+    const isJumpPressed = !!this.keys['space'] || this.jumpRequested;
+    this.jumpRequested = false;
+
+    // Step 2: Normalize input vector so diagonal movement is not faster than cardinal
+    const inputLen = Math.hypot(inputForward, inputRight);
+    let normForward = 0;
+    let normRight = 0;
+    if (inputLen > 0.001) {
+      normForward = inputForward / inputLen;
+      normRight = inputRight / inputLen;
+    }
+
+    // Step 3: Calculate Camera-Relative Movement
+    // "Forward" means wherever camera looks horizontally (XZ plane)
     const camForward = this.camera.getForwardVector();
     const camRight = this.camera.getRightVector();
 
-    let moveDir = camForward.scale(inputForward).add(camRight.scale(inputRight));
-    const inputMagnitude = moveDir.length();
+    this._moveDir.x = camForward.x * normForward + camRight.x * normRight;
+    this._moveDir.y = 0;
+    this._moveDir.z = camForward.z * normForward + camRight.z * normRight;
 
-    if (inputMagnitude > 0.01) {
-      moveDir = moveDir.normalize();
+    const moveMag = Math.hypot(this._moveDir.x, this._moveDir.z);
+
+    if (moveMag > 0.01) {
       this.isMoving = true;
 
-      // Smoothly rotate character mesh towards the movement heading
-      const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+      // Smoothly rotate character mesh towards movement heading
+      // Uses frame-rate-independent exponential slerp
+      const targetAngle = Math.atan2(this._moveDir.x, this._moveDir.z);
       const currentAngle = this.rootMesh.rotation.y;
       const diff = Math.atan2(Math.sin(targetAngle - currentAngle), Math.cos(targetAngle - currentAngle));
-      this.rootMesh.rotation.y += diff * 12.0 * deltaTime; // 12x angular speed for responsive turning
+      const turnFactor = 1.0 - Math.exp(-14.0 * dt);
+      this.rootMesh.rotation.y += diff * turnFactor;
     } else {
+      // Stationary: Camera can orbit 360° freely without spinning player body!
       this.isMoving = false;
+      this._moveDir.set(0, 0, 0);
     }
 
-    // Step 3: Ground detection via downward Raycast
+    // Step 4: Ground detection via downward Raycast
     this.checkGrounded();
 
-    // Step 4: Vertical Velocity & Jumping
+    // Step 5: Vertical Velocity & Jumping
     if (this.isGrounded) {
       if (isJumpPressed) {
         this.verticalVelocity = this.jumpForce; // Launch upward
         this.isGrounded = false;
       } else {
-        // Small downward force to stick smoothly to slopes/curbs
+        // Subtle downward force to stick smoothly to curbs and downward slopes
         this.verticalVelocity = -0.5;
       }
     } else {
-      // In mid-air: Apply gravitational acceleration (v = v + g * dt)
-      this.verticalVelocity += this.gravity * deltaTime;
-      // Clamp terminal fall velocity so you don't drop at infinite speed
+      // In mid-air: Apply gravitational acceleration
+      this.verticalVelocity += this.gravity * dt;
+      // Clamp terminal fall velocity
       this.verticalVelocity = Math.max(this.verticalVelocity, -25.0);
     }
 
-    // Step 5: Horizontal movement speed & Sidewalk Step Assist
+    // Step 6: Horizontal movement speed & Sidewalk Step Assist
     const currentSpeed = this.isSprinting ? this.runSpeed : this.walkSpeed;
-    const horizontalVelocity = moveDir.scale(this.isMoving ? currentSpeed : 0);
+    const horizontalSpeed = this.isMoving ? currentSpeed : 0;
+    const vx = this._moveDir.x * horizontalSpeed;
+    const vz = this._moveDir.z * horizontalSpeed;
 
-    // Sidewalk Step Assist: Smoothly step up onto 0.25m curbs without stopping or requiring manual jump
+    // Sidewalk Step Assist: Mount 0.25m curbs smoothly without stopping
     if (this.isMoving && this.isGrounded) {
-      const stepRayOrigin = this.rootMesh.position.add(new Vector3(0, 0.12, 0));
-      const stepRay = new Ray(stepRayOrigin, moveDir, 0.65);
-      const stepHit = this.scene.pickWithRay(stepRay, (mesh) => {
+      const pos = this.rootMesh.position;
+      this._stepRay.origin.set(pos.x, pos.y + 0.12, pos.z);
+      this._stepRay.direction.copyFrom(this._moveDir);
+
+      const stepHit = this.scene.pickWithRay(this._stepRay, (mesh) => {
         return mesh.checkCollisions && mesh !== this.rootMesh && !mesh.name.startsWith('player_');
       });
 
       if (stepHit && stepHit.hit) {
-        // Confirm upper knee/waist is clear (meaning obstacle is a curb/step, not a full building wall)
-        const highRayOrigin = this.rootMesh.position.add(new Vector3(0, 0.45, 0));
-        const highRay = new Ray(highRayOrigin, moveDir, 0.7);
-        const highHit = this.scene.pickWithRay(highRay, (mesh) => {
+        // Check if upper chest is clear (curb, not a full building wall)
+        this._highRay.origin.set(pos.x, pos.y + 0.45, pos.z);
+        this._highRay.direction.copyFrom(this._moveDir);
+
+        const highHit = this.scene.pickWithRay(this._highRay, (mesh) => {
           return mesh.checkCollisions && mesh !== this.rootMesh && !mesh.name.startsWith('player_');
         });
 
         if (!highHit || !highHit.hit) {
-          this.verticalVelocity = 1.6; // Gentle vertical lift to smoothly mount the curb
+          this.verticalVelocity = 1.6; // Gentle step-up lift
         }
       }
     }
 
-    // Update internal velocity vector (for state synchronization)
-    this.velocity = new Vector3(horizontalVelocity.x, this.verticalVelocity, horizontalVelocity.z);
+    // Update internal velocity vector for multiplayer network synchronization
+    this.velocity.set(vx, this.verticalVelocity, vz);
 
-    // Step 6: Assemble total 3D displacement vector (dx = v * dt)
-    const displacement = new Vector3(
-      horizontalVelocity.x * deltaTime,
-      this.verticalVelocity * deltaTime,
-      horizontalVelocity.z * deltaTime
-    );
+    // Step 7: Assemble total 3D displacement vector (dx = v * dt)
+    this._displacement.set(vx * dt, this.verticalVelocity * dt, vz * dt);
 
-    // Step 7: Move with Babylon's collision detection (slides along walls)
-    this.rootMesh.moveWithCollisions(displacement);
+    // Step 8: Move with Babylon's collision detection (slides smoothly along walls)
+    this.rootMesh.moveWithCollisions(this._displacement);
 
-    // Step 8: Safety respawn if falling out of world (spawns safely at avenue promenade, not inside monument)
+    // Step 9: Safety respawn if falling out of world
     if (this.rootMesh.position.y < -5) {
       this.rootMesh.position.set(0, 1.2, 8);
       this.verticalVelocity = 0;
     }
 
-    // Step 9: Update character animation state
+    // Step 10: Update character animation state
+    if (this.animation.getState() === 'handshake') {
+      this.animation.update(dt);
+      return;
+    }
+
     let nextAnimState: AnimationState = 'idle';
     if (!this.isGrounded) {
       nextAnimState = 'jump';
@@ -219,20 +328,26 @@ export class PlayerController {
     }
 
     this.animation.setState(nextAnimState);
-    this.animation.update(deltaTime);
+    this.animation.update(dt);
   }
 
   /**
    * =========================================================================
-   * checkGrounded() - Raycast Laser Ground Detector
+   * checkGrounded() - Raycast Ground Detector
    * =========================================================================
-   * Shoots an invisible ray downwards 0.65m from the character's knees.
-   * If it hits a solid mesh with collision enabled, the player is grounded.
+   * Shoots reusable downward ray from 0.4m above player feet.
    */
   private checkGrounded(): void {
-    const rayOrigin = this.rootMesh.position.add(new Vector3(0, 0.4, 0));
-    const ray = new Ray(rayOrigin, new Vector3(0, -1, 0), 0.65);
-    const hit = this.scene.pickWithRay(ray, (mesh) => {
+    // If moving upwards with positive velocity, character cannot be grounded
+    if (this.verticalVelocity > 0.1) {
+      this.isGrounded = false;
+      return;
+    }
+
+    const pos = this.rootMesh.position;
+    this._groundRay.origin.set(pos.x, pos.y + 0.4, pos.z);
+
+    const hit = this.scene.pickWithRay(this._groundRay, (mesh) => {
       return mesh.checkCollisions && mesh !== this.rootMesh && !mesh.name.startsWith('player_');
     });
 

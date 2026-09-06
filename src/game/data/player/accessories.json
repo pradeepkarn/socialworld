@@ -1,0 +1,40 @@
+{
+  "items": [
+    {
+      "id": "none",
+      "name": "None",
+      "slot": "none",
+      "meshType": "none"
+    },
+    {
+      "id": "monocle_hud",
+      "name": "Cyber Monocle HUD",
+      "slot": "head",
+      "meshType": "monocle_hud"
+    },
+    {
+      "id": "ear_headset",
+      "name": "Ear Comms Headset",
+      "slot": "ear",
+      "meshType": "headset"
+    },
+    {
+      "id": "pauldron",
+      "name": "Shoulder Pauldron",
+      "slot": "shoulder_left",
+      "meshType": "pauldron"
+    },
+    {
+      "id": "rebreather",
+      "name": "Rebreather Mask",
+      "slot": "mouth",
+      "meshType": "rebreather"
+    },
+    {
+      "id": "spine_battery",
+      "name": "Spine Battery Pack",
+      "slot": "back",
+      "meshType": "battery_pack"
+    }
+  ]
+}

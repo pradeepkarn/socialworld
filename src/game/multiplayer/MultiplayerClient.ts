@@ -19,6 +19,9 @@ export type PlayerJoinedHandler = (player: IPlayerNetworkState) => void;
 export type PlayerLeftHandler = (id: string) => void;
 export type PlayerUpdatesHandler = (updates: IPlayerNetworkState[]) => void;
 export type NetworkStatsHandler = (stats: INetworkStats) => void;
+export type HandshakePromptHandler = (payload: { fromId: string; fromName: string }) => void;
+export type HandshakeStartHandler = (payload: { player1Id: string; player2Id: string; durationMs: number }) => void;
+export type HandshakeCompleteHandler = (payload: { player1Id: string; player2Id: string; rewardCredits: number }) => void;
 
 export class MultiplayerClient {
   private socket: WebSocket | null = null;
@@ -45,18 +48,45 @@ export class MultiplayerClient {
   private playerLeftHandlers: Set<PlayerLeftHandler> = new Set();
   private playerUpdatesHandlers: Set<PlayerUpdatesHandler> = new Set();
   private statsHandlers: Set<NetworkStatsHandler> = new Set();
+  private handshakePromptHandlers: Set<HandshakePromptHandler> = new Set();
+  private handshakeStartHandlers: Set<HandshakeStartHandler> = new Set();
+  private handshakeCompleteHandlers: Set<HandshakeCompleteHandler> = new Set();
 
   constructor() {}
 
   /**
    * Connects to the dedicated WebSocket server.
    */
-  public connect(url?: string): Promise<boolean> {
+  public async connect(url?: string): Promise<boolean> {
     if (url) {
       this.serverUrl = url;
     } else if (typeof window !== 'undefined') {
       const hostname = window.location.hostname || 'localhost';
-      this.serverUrl = `ws://${hostname}:3001`;
+      const isIpOrLocal =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        /^\d+\.\d+\.\d+\.\d+$/.test(hostname);
+
+      if (isIpOrLocal) {
+        this.serverUrl = `ws://${hostname}:3001`;
+      } else {
+        // When accessed via machine hostname (e.g. "pradeep"), resolve true LAN IP to prevent mobile DNS failure
+        try {
+          const res = await fetch('/api/network-info');
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.wsUrl) {
+              this.serverUrl = data.wsUrl;
+            } else {
+              this.serverUrl = `ws://${hostname}:3001`;
+            }
+          } else {
+            this.serverUrl = `ws://${hostname}:3001`;
+          }
+        } catch {
+          this.serverUrl = `ws://${hostname}:3001`;
+        }
+      }
     }
 
     this.shouldReconnect = true;
@@ -64,11 +94,11 @@ export class MultiplayerClient {
 
     return new Promise((resolve) => {
       try {
-        console.log(`[MultiplayerClient] Connecting to ${this.serverUrl}...`);
+        console.log(`[MultiplayerClient] Connecting to WebSocket server at ${this.serverUrl}...`);
         this.socket = new WebSocket(this.serverUrl);
 
         this.socket.onopen = () => {
-          console.log('[MultiplayerClient] Connected successfully.');
+          console.log(`[MultiplayerClient] Connected successfully to ${this.serverUrl}`);
           this.reconnectAttempts = 0;
           this.setStatus('ONLINE');
           this.startPingLoop();
@@ -88,8 +118,17 @@ export class MultiplayerClient {
         };
 
         this.socket.onerror = (err) => {
-          console.warn('[MultiplayerClient] Socket error encountered:', err);
+          console.warn(`[MultiplayerClient] Socket error connecting to ${this.serverUrl}:`, err);
           this.setStatus('ERROR');
+          // If connection failed on a hostname, fallback to querying /api/network-info for true IP
+          if (typeof window !== 'undefined' && !/^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
+            fetch('/api/network-info')
+              .then((r) => r.json())
+              .then((data) => {
+                if (data?.wsUrl) this.serverUrl = data.wsUrl;
+              })
+              .catch(() => {});
+          }
         };
       } catch (err) {
         console.error('[MultiplayerClient] Connection exception:', err);
@@ -144,6 +183,21 @@ export class MultiplayerClient {
             this.ping = Math.max(0, Date.now() - msg.payload.timestamp);
             this.emitStats();
           }
+          break;
+        }
+
+        case 'handshake_prompt': {
+          this.handshakePromptHandlers.forEach((handler) => handler(msg.payload));
+          break;
+        }
+
+        case 'handshake_start': {
+          this.handshakeStartHandlers.forEach((handler) => handler(msg.payload));
+          break;
+        }
+
+        case 'handshake_complete': {
+          this.handshakeCompleteHandlers.forEach((handler) => handler(msg.payload));
           break;
         }
       }
@@ -288,6 +342,47 @@ export class MultiplayerClient {
     return () => this.statsHandlers.delete(handler);
   }
 
+  public onHandshakePrompt(handler: HandshakePromptHandler): () => void {
+    this.handshakePromptHandlers.add(handler);
+    return () => this.handshakePromptHandlers.delete(handler);
+  }
+
+  public onHandshakeStart(handler: HandshakeStartHandler): () => void {
+    this.handshakeStartHandlers.add(handler);
+    return () => this.handshakeStartHandlers.delete(handler);
+  }
+
+  public onHandshakeComplete(handler: HandshakeCompleteHandler): () => void {
+    this.handshakeCompleteHandlers.add(handler);
+    return () => this.handshakeCompleteHandlers.delete(handler);
+  }
+
+  public sendHandshakeRequest(targetId: string): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    const msg: ClientMessage = {
+      type: 'handshake_request',
+      payload: { targetId },
+    };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      console.error('[MultiplayerClient] sendHandshakeRequest error:', err);
+    }
+  }
+
+  public sendHandshakeAccept(requesterId: string): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    const msg: ClientMessage = {
+      type: 'handshake_accept',
+      payload: { requesterId },
+    };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      console.error('[MultiplayerClient] sendHandshakeAccept error:', err);
+    }
+  }
+
   public disconnect(): void {
     this.shouldReconnect = false;
     this.stopPingLoop();
@@ -305,5 +400,8 @@ export class MultiplayerClient {
     this.playerLeftHandlers.clear();
     this.playerUpdatesHandlers.clear();
     this.statsHandlers.clear();
+    this.handshakePromptHandlers.clear();
+    this.handshakeStartHandlers.clear();
+    this.handshakeCompleteHandlers.clear();
   }
 }

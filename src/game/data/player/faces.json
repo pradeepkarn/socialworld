@@ -1,0 +1,73 @@
+{
+  "types": [
+    {
+      "id": "oval",
+      "name": "Oval",
+      "jawWidthMod": 1.0,
+      "chinLengthMod": 1.0
+    },
+    {
+      "id": "chiseled",
+      "name": "Chiseled",
+      "jawWidthMod": 1.12,
+      "chinLengthMod": 1.08
+    },
+    {
+      "id": "square",
+      "name": "Square",
+      "jawWidthMod": 1.18,
+      "chinLengthMod": 0.95
+    },
+    {
+      "id": "narrow",
+      "name": "Narrow",
+      "jawWidthMod": 0.88,
+      "chinLengthMod": 1.05
+    },
+    {
+      "id": "round",
+      "name": "Round",
+      "jawWidthMod": 1.06,
+      "chinLengthMod": 0.92
+    },
+    {
+      "id": "cyber",
+      "name": "Cyber-Augmented",
+      "jawWidthMod": 1.04,
+      "chinLengthMod": 1.0,
+      "hasCyberPlating": true
+    }
+  ],
+  "optics": [
+    {
+      "id": "visor",
+      "name": "Cyber Visor",
+      "meshStyle": "visor",
+      "emissive": true
+    },
+    {
+      "id": "bilateral",
+      "name": "Bilateral Cyber Optics",
+      "meshStyle": "bilateral",
+      "emissive": true
+    },
+    {
+      "id": "goggles",
+      "name": "Tactical Goggles",
+      "meshStyle": "goggles",
+      "emissive": false
+    },
+    {
+      "id": "monocle",
+      "name": "Monocle Lens",
+      "meshStyle": "monocle",
+      "emissive": true
+    },
+    {
+      "id": "split_visor",
+      "name": "Split Dual Visor",
+      "meshStyle": "split_visor",
+      "emissive": true
+    }
+  ]
+}

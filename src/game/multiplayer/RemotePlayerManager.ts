@@ -1,4 +1,4 @@
-import { Scene } from '@babylonjs/core';
+import { Scene, Vector3 } from '@babylonjs/core';
 import { RemotePlayer } from './RemotePlayer';
 import { IPlayerNetworkState } from './NetworkTypes';
 
@@ -80,6 +80,29 @@ export class RemotePlayerManager {
    */
   public getCount(): number {
     return this.remotePlayers.size;
+  }
+
+  /**
+   * Finds the nearest remote player within maxDistance (default 2.5m).
+   */
+  public findNearestPlayer(pos: Vector3, maxDistance: number = 2.5): RemotePlayer | null {
+    let nearest: RemotePlayer | null = null;
+    let minDistanceSq = maxDistance * maxDistance;
+
+    for (const player of this.remotePlayers.values()) {
+      const p = player.rootMesh.position;
+      const dx = p.x - pos.x;
+      const dy = p.y - pos.y;
+      const dz = p.z - pos.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
+        nearest = player;
+      }
+    }
+
+    return nearest;
   }
 
   /**

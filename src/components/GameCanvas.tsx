@@ -24,7 +24,17 @@ import {
 export interface GameCanvasHandle {
   purchaseItem: (shopId: string, productId: string) => { success: boolean; message: string };
   toggleTimeOfDay: () => TimeOfDay;
+  setTimeOfDay: (time: TimeOfDay) => void;
   closeShop: () => void;
+  setMobileJoystick: (forward: number, right: number, isSprinting: boolean) => void;
+  rotateCamera: (deltaYaw: number, deltaPitch: number) => void;
+  zoomCamera: (delta: number) => void;
+  setCameraDistance: (dist: number) => void;
+  getCameraDistance: () => number;
+  setCameraSensitivity: (multiplier: number) => void;
+  triggerJump: () => void;
+  triggerInteract: () => void;
+  triggerHandshake: () => void;
 }
 
 interface GameCanvasProps {
@@ -34,6 +44,7 @@ interface GameCanvasProps {
   onMinimapUpdate: (data: { position: IVector3; rotationY: number }) => void;
   onTimeOfDayChange: (time: TimeOfDay) => void;
   onNetworkStatsUpdate?: (stats: INetworkStats) => void;
+  onSocialNotification?: (message: string) => void;
   canvasRefCallback?: (handle: GameCanvasHandle | null) => void;
 }
 
@@ -61,6 +72,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onMinimapUpdate,
   onTimeOfDayChange,
   onNetworkStatsUpdate,
+  onSocialNotification,
   canvasRefCallback,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -101,7 +113,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (typeof window !== 'undefined') {
         (window as unknown as Record<string, unknown>).__player = player;
         (window as unknown as Record<string, unknown>).__remotePlayerManager = remotePlayerManager;
+        (window as unknown as Record<string, unknown>).__networkClient = networkClient;
       }
+
+      // Handshake & Combined Prompts Coordination
+      let pendingHandshakePrompt: { fromId: string; fromName: string } | null = null;
+      let pendingPromptTimeout: NodeJS.Timeout | null = null;
+      let shopPrompt: IInteractionPrompt = { visible: false, message: '', actionKey: 'E' };
+      let handshakePrompt: IInteractionPrompt | null = null;
+      let lastDispatchedKey: string = '';
+
+      const dispatchCombinedPrompt = () => {
+        if (isDisposed) return;
+        const active = handshakePrompt || (shopPrompt.visible ? shopPrompt : null) || { visible: false, message: '', actionKey: 'E' };
+        const key = `${active.visible}_${active.actionKey}_${active.message}`;
+        if (key !== lastDispatchedKey) {
+          lastDispatchedKey = key;
+          onPromptChange(active);
+        }
+      };
 
       networkClient.onWelcome((payload) => {
         if (player) {
@@ -134,6 +164,116 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       });
 
+      networkClient.onHandshakePrompt((payload) => {
+        pendingHandshakePrompt = payload;
+        if (pendingPromptTimeout) clearTimeout(pendingPromptTimeout);
+        pendingPromptTimeout = setTimeout(() => {
+          if (pendingHandshakePrompt?.fromId === payload.fromId) {
+            pendingHandshakePrompt = null;
+            handshakePrompt = null;
+            dispatchCombinedPrompt();
+          }
+        }, 8000);
+      });
+
+      networkClient.onHandshakeStart((payload) => {
+        if (pendingHandshakePrompt?.fromId === payload.player1Id || pendingHandshakePrompt?.fromId === payload.player2Id) {
+          pendingHandshakePrompt = null;
+          if (pendingPromptTimeout) clearTimeout(pendingPromptTimeout);
+        }
+        handshakePrompt = null;
+        dispatchCombinedPrompt();
+
+        const isLocalP1 = player && player.id === payload.player1Id;
+        const isLocalP2 = player && player.id === payload.player2Id;
+
+        if (isLocalP1 || isLocalP2) {
+          const partnerId = isLocalP1 ? payload.player2Id : payload.player1Id;
+          const partner = remotePlayerManager.getPlayers().get(partnerId);
+          if (player && partner) {
+            // Both local player and remote partner continuously face each other
+            player.playHandshake(partner.rootMesh, payload.durationMs);
+            player.nametag.setText(`🤝 ${player.name}`, '#22c55e', true);
+
+            partner.setHandshakePartner(player.rootMesh, payload.durationMs);
+            partner.nametag.setText(`🤝 ${partner.name}`, '#22c55e', false);
+
+            setTimeout(() => {
+              if (player) {
+                player.nametag.setText(player.name, player.appearance.accentColorHex, true);
+              }
+              if (partner) {
+                partner.nametag.setText(partner.name, partner.appearance.accentColorHex, false);
+              }
+            }, payload.durationMs);
+          }
+        } else {
+          // Both are remote players observed by this client
+          const p1 = remotePlayerManager.getPlayers().get(payload.player1Id);
+          const p2 = remotePlayerManager.getPlayers().get(payload.player2Id);
+          if (p1 && p2) {
+            p1.setHandshakePartner(p2.rootMesh, payload.durationMs);
+            p2.setHandshakePartner(p1.rootMesh, payload.durationMs);
+            p1.nametag.setText(`🤝 ${p1.name}`, '#22c55e', false);
+            p2.nametag.setText(`🤝 ${p2.name}`, '#22c55e', false);
+
+            setTimeout(() => {
+              p1.nametag.setText(p1.name, p1.appearance.accentColorHex, false);
+              p2.nametag.setText(p2.name, p2.appearance.accentColorHex, false);
+            }, payload.durationMs);
+          }
+        }
+      });
+
+      networkClient.onHandshakeComplete((payload) => {
+        const isLocalP1 = player && player.id === payload.player1Id;
+        const isLocalP2 = player && player.id === payload.player2Id;
+        if (isLocalP1 || isLocalP2) {
+          if (player) {
+            player.addCredits(payload.rewardCredits);
+            onPlayerStatsUpdate({
+              credits: player.credits,
+              inventory: [...player.inventory],
+            });
+            const partnerId = isLocalP1 ? payload.player2Id : payload.player1Id;
+            const partner = remotePlayerManager.getPlayers().get(partnerId);
+            const partnerName = partner ? partner.name : 'Player';
+            if (onSocialNotification) {
+              onSocialNotification(`🤝 Handshake with ${partnerName}! +${payload.rewardCredits} Credits`);
+            }
+          }
+        }
+      });
+
+      player.controller.onHandshakePressed = () => {
+        if (pendingHandshakePrompt) {
+          const reqId = pendingHandshakePrompt.fromId;
+          pendingHandshakePrompt = null;
+          if (pendingPromptTimeout) clearTimeout(pendingPromptTimeout);
+          handshakePrompt = null;
+          dispatchCombinedPrompt();
+          networkClient.sendHandshakeAccept(reqId);
+        } else if (player) {
+          const nearest = remotePlayerManager.findNearestPlayer(player.rootMesh.position, 2.5);
+          if (nearest) {
+            networkClient.sendHandshakeRequest(nearest.id);
+            handshakePrompt = {
+              visible: true,
+              message: `🤝 Sent handshake request to ${nearest.name}...`,
+              actionKey: 'WAIT',
+              targetName: nearest.name,
+            };
+            dispatchCombinedPrompt();
+            setTimeout(() => {
+              if (handshakePrompt?.actionKey === 'WAIT') {
+                handshakePrompt = null;
+                dispatchCombinedPrompt();
+              }
+            }, 3000);
+          }
+        }
+      };
+
       networkClient.connect();
 
       // 5. Shops & Interactions
@@ -150,7 +290,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       // Subscribe to interactions
       const unsubPrompt = interactionManager.onPrompt((prompt) => {
-        if (!isDisposed) onPromptChange(prompt);
+        shopPrompt = prompt;
+        dispatchCombinedPrompt();
       });
 
       const unsubShop = interactionManager.onOpenShop((shop) => {
@@ -177,8 +318,56 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             onTimeOfDayChange(next);
             return next;
           },
+          setTimeOfDay: (time: TimeOfDay) => {
+            if (!worldManager) return;
+            worldManager.setTimeOfDay(time);
+            onTimeOfDayChange(time);
+          },
           closeShop: () => {
             if (interactionManager) interactionManager.closeShop();
+          },
+          setMobileJoystick: (forward: number, right: number, isSprinting: boolean) => {
+            if (player) {
+              player.controller.setVirtualJoystick(forward, right, isSprinting);
+            }
+          },
+          rotateCamera: (deltaYaw: number, deltaPitch: number) => {
+            if (player) {
+              player.camera.rotate(deltaYaw, deltaPitch);
+            }
+          },
+          zoomCamera: (delta: number) => {
+            if (player) {
+              player.camera.zoom(delta);
+            }
+          },
+          setCameraDistance: (dist: number) => {
+            if (player) {
+              player.camera.setDistance(dist);
+            }
+          },
+          getCameraDistance: () => {
+            return player ? player.camera.getRadius() : 9.0;
+          },
+          setCameraSensitivity: (multiplier: number) => {
+            if (player) {
+              player.camera.setSensitivityMultiplier(multiplier);
+            }
+          },
+          triggerJump: () => {
+            if (player) {
+              player.controller.triggerJump();
+            }
+          },
+          triggerInteract: () => {
+            if (player) {
+              player.controller.triggerInteract();
+            }
+          },
+          triggerHandshake: () => {
+            if (player) {
+              player.controller.triggerHandshake();
+            }
           },
         });
       }
@@ -214,6 +403,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           interactionManager.update();
         }
 
+        // Check proximity for handshake with remote players
+        if (player && player.animation.getState() !== 'handshake') {
+          if (pendingHandshakePrompt) {
+            handshakePrompt = {
+              visible: true,
+              message: `🤝 ${pendingHandshakePrompt.fromName} wants to handshake! Press [H] to Accept`,
+              actionKey: 'H',
+              targetName: pendingHandshakePrompt.fromName,
+            };
+          } else {
+            const nearest = remotePlayerManager.findNearestPlayer(player.rootMesh.position, 2.5);
+            if (nearest && nearest.animation.getState() !== 'handshake') {
+              if (!handshakePrompt || handshakePrompt.actionKey !== 'WAIT') {
+                handshakePrompt = {
+                  visible: true,
+                  message: `🤝 Press [H] to Handshake with ${nearest.name}`,
+                  actionKey: 'H',
+                  targetName: nearest.name,
+                };
+              }
+            } else if (handshakePrompt && handshakePrompt.actionKey !== 'WAIT') {
+              handshakePrompt = null;
+            }
+          }
+          dispatchCombinedPrompt();
+        }
+
         // Render scene
         scene.render();
 
@@ -232,21 +448,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       });
 
-      // Handle window resizing
+      // Handle window resizing and mobile address-bar adjustments for horizontal & vertical
       const handleResize = () => {
         if (engine && !isDisposed) {
           engine.resize();
         }
       };
-      window.addEventListener('resize', handleResize);
+
+      const handleOrientationOrResize = () => {
+        handleResize();
+        // Mobile browsers defer viewport dimension updates during orientation rotation
+        setTimeout(handleResize, 100);
+        setTimeout(handleResize, 300);
+      };
+
+      window.addEventListener('resize', handleOrientationOrResize);
+      window.addEventListener('orientationchange', handleOrientationOrResize);
+      if (typeof screen !== 'undefined' && screen.orientation) {
+        screen.orientation.addEventListener('change', handleOrientationOrResize);
+      }
+      if (typeof window !== 'undefined' && window.visualViewport) {
+        window.visualViewport.addEventListener('resize', handleOrientationOrResize);
+      }
 
       // Cleanup
       return () => {
         isDisposed = true;
         if (canvasRefCallback) canvasRefCallback(null);
-        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('resize', handleOrientationOrResize);
+        window.removeEventListener('orientationchange', handleOrientationOrResize);
+        if (typeof screen !== 'undefined' && screen.orientation) {
+          screen.orientation.removeEventListener('change', handleOrientationOrResize);
+        }
+        if (typeof window !== 'undefined' && window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', handleOrientationOrResize);
+        }
         unsubPrompt();
         unsubShop();
+
+        if (pendingPromptTimeout) {
+          clearTimeout(pendingPromptTimeout);
+          pendingPromptTimeout = null;
+        }
 
         networkClient.disconnect();
         remotePlayerManager.dispose();
@@ -255,6 +498,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           delete (window as unknown as Record<string, unknown>).__scene;
           delete (window as unknown as Record<string, unknown>).__player;
           delete (window as unknown as Record<string, unknown>).__remotePlayerManager;
+          delete (window as unknown as Record<string, unknown>).__networkClient;
         }
 
         if (interactionManager) interactionManager.dispose();

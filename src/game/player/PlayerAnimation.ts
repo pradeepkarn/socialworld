@@ -36,9 +36,26 @@ export class PlayerAnimation {
 
   // Smoothing / blend factor
   private blendWeight: number = 1.0;
+  private baseTorsoY: number = 1.05;
 
-  constructor(limbs: IPlayerLimbNodes) {
+  constructor(limbs: IPlayerLimbNodes, baseTorsoY?: number) {
     this.limbs = limbs;
+    this.baseTorsoY = baseTorsoY ?? limbs.torso?.position?.y ?? 1.05;
+  }
+
+  /**
+   * Updates reference limb nodes (e.g. when appearance changes).
+   */
+  public setLimbs(limbs: IPlayerLimbNodes, baseTorsoY?: number): void {
+    this.limbs = limbs;
+    this.baseTorsoY = baseTorsoY ?? limbs.torso?.position?.y ?? 1.05;
+  }
+
+  /**
+   * Sets base torso Y position based on player leg/torso height.
+   */
+  public setBaseTorsoY(y: number): void {
+    this.baseTorsoY = y;
   }
 
   /**
@@ -68,16 +85,22 @@ export class PlayerAnimation {
     this.animTimer += deltaTime;
 
     const { torso, leftArm, rightArm, leftLeg, rightLeg } = this.limbs;
+    if (!torso || !leftArm || !rightArm || !leftLeg || !rightLeg) return;
 
     switch (this.currentState) {
       // 1. IDLE: Subtle rhythmic breathing and idle arm sway
       case 'idle': {
         const breathe = Math.sin(this.animTimer * 2.2) * 0.03; // Gentle chest rise & fall
-        torso.position.y = 1.05 + breathe;
+        torso.position.y = this.baseTorsoY + breathe;
         torso.rotation.x = 0;
 
         leftArm.rotation.x = Math.sin(this.animTimer * 1.8) * 0.05;
+        leftArm.rotation.y = 0;
+        leftArm.rotation.z = 0;
+
         rightArm.rotation.x = -Math.sin(this.animTimer * 1.8) * 0.05;
+        rightArm.rotation.y = 0;
+        rightArm.rotation.z = 0;
 
         leftLeg.rotation.x = 0;
         rightLeg.rotation.x = 0;
@@ -92,14 +115,18 @@ export class PlayerAnimation {
         const armSwing = Math.sin(phase) * 0.45;             // Arm swing in counter-phase
         const hipBob = Math.abs(Math.cos(phase)) * 0.06;     // Natural vertical hip bounce
 
-        torso.position.y = 1.05 + hipBob;
+        torso.position.y = this.baseTorsoY + hipBob;
         torso.rotation.x = 0.05; // Slight forward lean
 
         // Counter-phase limb pendulum (opposites move together)
         leftLeg.rotation.x = legSwing;
         rightLeg.rotation.x = -legSwing;
         leftArm.rotation.x = -armSwing;
+        leftArm.rotation.y = 0;
+        leftArm.rotation.z = 0;
         rightArm.rotation.x = armSwing;
+        rightArm.rotation.y = 0;
+        rightArm.rotation.z = 0;
         break;
       }
 
@@ -111,19 +138,23 @@ export class PlayerAnimation {
         const armSwing = Math.sin(phase) * 0.8;              // Powerful arm pump
         const hipBob = Math.abs(Math.cos(phase)) * 0.12;     // Energetic running bounce
 
-        torso.position.y = 1.05 + hipBob;
+        torso.position.y = this.baseTorsoY + hipBob;
         torso.rotation.x = 0.18; // Athletic forward sprinter lean
 
         leftLeg.rotation.x = legSwing;
         rightLeg.rotation.x = -legSwing;
         leftArm.rotation.x = -armSwing;
+        leftArm.rotation.y = 0;
+        leftArm.rotation.z = 0;
         rightArm.rotation.x = armSwing;
+        rightArm.rotation.y = 0;
+        rightArm.rotation.z = 0;
         break;
       }
 
       // 4. JUMP: Airborne dynamic tuck pose
       case 'jump': {
-        torso.position.y = 1.1;
+        torso.position.y = this.baseTorsoY + 0.05;
         torso.rotation.x = 0.08;
 
         // Bent knees tucked for mid-air suspension
@@ -131,7 +162,30 @@ export class PlayerAnimation {
         rightLeg.rotation.x = -0.3;
         // Arms thrown forward/up for balance
         leftArm.rotation.x = 0.6;
+        leftArm.rotation.y = 0;
+        leftArm.rotation.z = 0;
         rightArm.rotation.x = 0.6;
+        rightArm.rotation.y = 0;
+        rightArm.rotation.z = 0;
+        break;
+      }
+
+      // 5. HANDSHAKE: Procedural greeting with right arm extended forward and pumping
+      case 'handshake': {
+        const pump = Math.sin(this.animTimer * 9.0) * 0.12;
+        torso.position.y = this.baseTorsoY;
+        torso.rotation.x = 0.04;
+
+        rightArm.rotation.x = -Math.PI / 2.3 + pump;
+        rightArm.rotation.y = -0.15;
+        rightArm.rotation.z = -0.05;
+
+        leftArm.rotation.x = 0.05;
+        leftArm.rotation.y = 0;
+        leftArm.rotation.z = 0;
+
+        leftLeg.rotation.x = 0;
+        rightLeg.rotation.x = 0;
         break;
       }
     }
@@ -142,11 +196,13 @@ export class PlayerAnimation {
    */
   public reset(): void {
     const { torso, leftArm, rightArm, leftLeg, rightLeg } = this.limbs;
-    torso.position.y = 1.05;
-    torso.rotation.setAll(0);
-    leftArm.rotation.setAll(0);
-    rightArm.rotation.setAll(0);
-    leftLeg.rotation.setAll(0);
-    rightLeg.rotation.setAll(0);
+    if (torso) {
+      torso.position.y = this.baseTorsoY;
+      torso.rotation.setAll(0);
+    }
+    if (leftArm) leftArm.rotation.setAll(0);
+    if (rightArm) rightArm.rotation.setAll(0);
+    if (leftLeg) leftLeg.rotation.setAll(0);
+    if (rightLeg) rightLeg.rotation.setAll(0);
   }
 }

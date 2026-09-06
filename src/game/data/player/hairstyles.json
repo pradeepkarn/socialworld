@@ -1,0 +1,60 @@
+{
+  "styles": [
+    {
+      "id": "buzzcut",
+      "name": "Buzzcut Fade",
+      "meshType": "dome_cap",
+      "height": 0.14,
+      "volume": 0.98
+    },
+    {
+      "id": "flattop",
+      "name": "Flat Top",
+      "meshType": "block_top",
+      "height": 0.22,
+      "volume": 1.02
+    },
+    {
+      "id": "sideswept",
+      "name": "Side-Swept Undercut",
+      "meshType": "swept_side",
+      "height": 0.19,
+      "volume": 1.06
+    },
+    {
+      "id": "afro",
+      "name": "Afro Crop",
+      "meshType": "spherical_puff",
+      "height": 0.24,
+      "volume": 1.15
+    },
+    {
+      "id": "cyberspikes",
+      "name": "Cyber Spikes",
+      "meshType": "faceted_spikes",
+      "height": 0.23,
+      "volume": 1.08
+    },
+    {
+      "id": "topknot",
+      "name": "Cyber Topknot",
+      "meshType": "knot_cylinder",
+      "height": 0.28,
+      "volume": 1.0
+    },
+    {
+      "id": "slicked",
+      "name": "Slicked Back",
+      "meshType": "streamlined_cap",
+      "height": 0.16,
+      "volume": 0.96
+    },
+    {
+      "id": "cabledreads",
+      "name": "Cable Dreads",
+      "meshType": "hanging_cables",
+      "height": 0.32,
+      "volume": 1.12
+    }
+  ]
+}
