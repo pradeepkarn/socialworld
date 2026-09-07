@@ -44,6 +44,12 @@ export interface ICameraConfig {
 
   // Pointer Lock Support
   enablePointerLock: boolean;
+
+  // Auto-Follow Behind Player Parameters
+  enableAutoFollow: boolean;
+  autoFollowSpeed: number;
+  autoFollowDelay: number;
+  autoFollowMinMoveSpeed: number;
 }
 
 export const defaultCameraConfig: ICameraConfig = {
@@ -84,4 +90,10 @@ export const defaultCameraConfig: ICameraConfig = {
 
   // Desktop Pointer Lock (false = standard click-and-drag with visible cursor)
   enablePointerLock: false,
+
+  // Auto-Follow Behind Player: smooth realign while moving/turning, delay after manual orbit
+  enableAutoFollow: true,
+  autoFollowSpeed: 2.8,
+  autoFollowDelay: 1.2, // seconds to wait after manual mouse/touch look before auto-follow resumes
+  autoFollowMinMoveSpeed: 0.15, // minimum speed (m/s) to be considered moving
 };

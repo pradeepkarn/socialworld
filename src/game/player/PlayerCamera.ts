@@ -31,6 +31,12 @@ export class PlayerCamera {
   private desiredRadius: number;
   private targetInitialized: boolean = false;
 
+  // Target tracking & auto-follow state
+  private lastTargetPos: Vector3 = new Vector3(0, 0, 0);
+  private isPointerInteracting: boolean = false;
+  private lastManualInputTime: number = 0;
+  private pointerCleanupListeners?: () => void;
+
   // Pointer Lock & Mouse Look state
   private isPointerLocked: boolean = false;
   private pointerLockEnabled: boolean = false;
@@ -92,6 +98,33 @@ export class PlayerCamera {
     this.canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
     this.wheelListener = onCanvasWheel;
 
+    // Track pointer interaction to differentiate active user dragging from auto-follow
+    const onPointerDown = () => {
+      this.isPointerInteracting = true;
+      this.lastManualInputTime = performance.now();
+    };
+    const onPointerMove = () => {
+      if (this.isPointerInteracting) {
+        this.lastManualInputTime = performance.now();
+      }
+    };
+    const onPointerUp = () => {
+      this.isPointerInteracting = false;
+      this.lastManualInputTime = performance.now();
+    };
+
+    this.canvas.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    this.pointerCleanupListeners = () => {
+      this.canvas.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+
     // Use custom raycast collision avoidance (Babylon's built-in checkCollisions on ArcRotateCamera causes radius popping)
     this.camera.checkCollisions = false;
 
@@ -127,6 +160,7 @@ export class PlayerCamera {
     const onMouseMove = (e: MouseEvent): void => {
       if (!this.isPointerLocked) return;
 
+      this.lastManualInputTime = performance.now();
       const movementX = e.movementX || 0;
       const movementY = e.movementY || 0;
 
@@ -193,6 +227,7 @@ export class PlayerCamera {
       this.targetMesh.position.z
     );
     this.camera.target.copyFrom(this.smoothedTarget);
+    this.lastTargetPos.copyFrom(this.targetMesh.position);
     this.targetInitialized = true;
   }
 
@@ -215,6 +250,7 @@ export class PlayerCamera {
    * Adjusts the desired camera radius smoothly (used by desktop mouse wheel & mobile pinch-to-zoom).
    */
   public zoom(delta: number): void {
+    this.lastManualInputTime = performance.now();
     this.desiredRadius = Math.max(
       this.config.minDistance,
       Math.min(this.config.maxDistance, this.desiredRadius + delta)
@@ -234,7 +270,7 @@ export class PlayerCamera {
    * =========================================================================
    * Called every frame with deltaTime to glide the camera smoothly and avoid clipping inside walls.
    */
-  public update(deltaTime: number = 0.016): void {
+  public update(deltaTime: number = 0.016, isMovingInput?: boolean): void {
     if (!this.targetMesh) return;
 
     // Clamp deltaTime to avoid extreme warping on tab switch or pause
@@ -249,6 +285,7 @@ export class PlayerCamera {
     if (!this.targetInitialized) {
       this.smoothedTarget.set(desiredX, desiredY, desiredZ);
       this.camera.target.copyFrom(this.smoothedTarget);
+      this.lastTargetPos.set(desiredX, this.targetMesh.position.y, desiredZ);
       this.targetInitialized = true;
       return;
     }
@@ -269,6 +306,67 @@ export class PlayerCamera {
       this.camera.beta = this.config.lowerBetaLimit;
     } else if (this.camera.beta > this.config.upperBetaLimit) {
       this.camera.beta = this.config.upperBetaLimit;
+    }
+
+    // Calculate displacement of target avatar on horizontal (XZ) plane
+    const moveX = desiredX - this.lastTargetPos.x;
+    const moveZ = desiredZ - this.lastTargetPos.z;
+    const distMoved = Math.hypot(moveX, moveZ);
+    const currentSpeed = dt > 0 ? distMoved / dt : 0;
+    this.lastTargetPos.set(desiredX, this.targetMesh.position.y, desiredZ);
+
+    // Check if player is moving (input parameter or physical velocity threshold)
+    const isMoving = isMovingInput !== undefined
+      ? isMovingInput
+      : (currentSpeed >= this.config.autoFollowMinMoveSpeed);
+
+    // Track Babylon camera's internal inertia (momentum from dragging)
+    if (
+      Math.abs(this.camera.inertialAlphaOffset) > 0.0001 ||
+      Math.abs(this.camera.inertialBetaOffset) > 0.0001 ||
+      Math.abs(this.camera.inertialRadiusOffset) > 0.0001
+    ) {
+      this.lastManualInputTime = performance.now();
+    }
+
+    // Auto-follow: smoothly realigns camera behind player avatar while moving/turning
+    // When stationary: completely disabled so user has free 360° look without spinning character
+    if (this.config.enableAutoFollow && isMoving) {
+      const now = performance.now();
+      const timeSinceManualInput = (now - this.lastManualInputTime) / 1000;
+
+      // Manual input override: never fight or snap against active drag or during cooldown
+      if (!this.isPointerInteracting && timeSinceManualInput >= this.config.autoFollowDelay) {
+        // Forward directional bias:
+        // Follow smoothly when running forward or diagonal forward.
+        // Disable auto-follow when running backward towards camera (prevents 180° spin loop).
+        let forwardBias = 1.0;
+        if (distMoved > 0.001) {
+          const dirX = moveX / distMoved;
+          const dirZ = moveZ / distMoved;
+          const camForward = this.getForwardVector();
+          const dot = camForward.x * dirX + camForward.z * dirZ;
+          // Scale bias: 0 when running backwards (dot <= 0.1), smoothly up to 1.0 when running forwards
+          forwardBias = Math.max(0, Math.min(1.0, (dot - 0.1) / 0.5));
+        }
+
+        if (forwardBias > 0.001) {
+          // Camera yaw directly behind player avatar
+          const targetAlpha = -this.targetMesh.rotation.y - Math.PI / 2;
+
+          // Shortest signed angular difference [-PI, PI]
+          const diff = Math.atan2(
+            Math.sin(targetAlpha - this.camera.alpha),
+            Math.cos(targetAlpha - this.camera.alpha)
+          );
+
+          if (Math.abs(diff) > 0.005) {
+            // Frame-rate independent exponential ease-in-out slerp
+            const factor = 1.0 - Math.exp(-this.config.autoFollowSpeed * forwardBias * dt);
+            this.camera.alpha += diff * factor;
+          }
+        }
+      }
     }
 
     // 2. Wall Occlusion Collision Raycast
@@ -382,6 +480,7 @@ export class PlayerCamera {
    * Rotates camera yaw and pitch with limits and sensitivity multiplier enforced.
    */
   public rotate(deltaYaw: number, deltaPitch: number): void {
+    this.lastManualInputTime = performance.now();
     const mult = this.config.sensitivityMultiplier || 1.0;
     this.camera.alpha += deltaYaw * mult;
     this.setPitch(this.camera.beta + deltaPitch * mult);
@@ -412,6 +511,9 @@ export class PlayerCamera {
     this.releasePointerLock();
     if (this.cleanupListeners) {
       this.cleanupListeners();
+    }
+    if (this.pointerCleanupListeners) {
+      this.pointerCleanupListeners();
     }
     if (this.wheelListener) {
       this.canvas.removeEventListener('wheel', this.wheelListener);
